@@ -5,14 +5,12 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
-#include "app/app.h"
 #include "app/commands/command.h"
-#include "app/ui/editor/editor.h"
-#include "ui/base.h"
 #include "app/context.h"
+#include "app/ui/editor/editor.h"
 
 namespace app {
 
@@ -26,7 +24,7 @@ protected:
 };
 
 SwapCheckerboardColorsCommand::SwapCheckerboardColorsCommand()
-  : Command(CommandId::SwapCheckerboardColors(), CmdUIOnlyFlag)
+  : Command(CommandId::SwapCheckerboardColors())
 {
 }
 

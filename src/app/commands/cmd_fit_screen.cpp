@@ -6,12 +6,11 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
 #include "app/commands/command.h"
-#include "app/context_access.h"
 #include "app/ui/editor/editor.h"
 
 namespace app {
@@ -25,8 +24,7 @@ protected:
   void onExecute(Context* context) override;
 };
 
-FitScreenCommand::FitScreenCommand()
-  : Command(CommandId::FitScreen(), CmdUIOnlyFlag)
+FitScreenCommand::FitScreenCommand() : Command(CommandId::FitScreen())
 {
 }
 
@@ -45,4 +43,4 @@ Command* CommandFactory::createFitScreenCommand()
   return new FitScreenCommand;
 }
 
-} //namespace app
+} // namespace app

@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019-2023  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/context_flags.h"
@@ -51,22 +51,15 @@ void ContextFlags::update(Context* context)
       document->unlock(res);
     }
 
-#ifdef ENABLE_UI
     // TODO this is a hack, try to find a better design to handle this
     // "moving pixels" state.
     auto editor = Editor::activeEditor();
-    if (editor &&
-        editor->document() == document &&
-        editor->isMovingPixels()) {
+    if (editor && editor->document() == document && editor->isMovingPixels()) {
       // Flags enabled when we are in MovingPixelsState
-      m_flags |=
-        HasVisibleMask |
-        ActiveDocumentIsReadable |
-        ActiveDocumentIsWritable;
+      m_flags |= HasVisibleMask | ActiveDocumentIsReadable | ActiveDocumentIsWritable;
 
       updateFlagsFromSite(editor->getSite());
     }
-#endif // ENABLE_UI
   }
 }
 
@@ -103,16 +96,15 @@ void ContextFlags::updateFlagsFromSite(const Site& site)
   if (layer->isTilemap())
     m_flags |= ActiveLayerIsTilemap;
 
-  if (layer->isImage()) {
+  if (layer->isImage())
     m_flags |= ActiveLayerIsImage;
 
-    Cel* cel = layer->cel(frame);
-    if (cel) {
-      m_flags |= HasActiveCel;
+  Cel* cel = layer->cel(frame);
+  if (cel) {
+    m_flags |= HasActiveCel;
 
-      if (cel->image())
-        m_flags |= HasActiveImage;
-    }
+    if (cel->image())
+      m_flags |= HasActiveImage;
   }
 
   if (site.selectedColors().picks() > 0)

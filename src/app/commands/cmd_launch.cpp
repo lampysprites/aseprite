@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2020  Igara Studio S.A.
+// Copyright (C) 2020-2024  Igara Studio S.A.
 // Copyright (C) 2001-2017  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/commands/command.h"
@@ -23,7 +23,10 @@ public:
 
 protected:
   void onLoadParams(const Params& params) override;
+  bool onNeedsParams() const override { return true; };
   void onExecute(Context* context) override;
+  std::string onGetFriendlyName() const override;
+  bool isListed(const Params& params) const override { return !params.get("path").empty(); }
 
 private:
   enum Type { Url };
@@ -32,10 +35,7 @@ private:
   std::string m_path;
 };
 
-LaunchCommand::LaunchCommand()
-  : Command(CommandId::Launch(), CmdUIOnlyFlag)
-  , m_type(Url)
-  , m_path("")
+LaunchCommand::LaunchCommand() : Command(CommandId::Launch()), m_type(Url), m_path("")
 {
 }
 
@@ -51,12 +51,13 @@ void LaunchCommand::onLoadParams(const Params& params)
 void LaunchCommand::onExecute(Context* context)
 {
   switch (m_type) {
-
-    case Url:
-      launcher::open_url(m_path);
-      break;
-
+    case Url: launcher::open_url(m_path); break;
   }
+}
+
+std::string LaunchCommand::onGetFriendlyName() const
+{
+  return Command::onGetFriendlyName() + ": " + m_path;
 }
 
 Command* CommandFactory::createLaunchCommand()

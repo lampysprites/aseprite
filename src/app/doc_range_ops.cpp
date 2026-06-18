@@ -1,15 +1,15 @@
 // Aseprite
-// Copyright (C) 2019-2020  Igara Studio S.A.
+// Copyright (C) 2019-2026  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 // Uncomment this in case you want to debug range ops
-//#define TRACE_RANGE_OPS
+// #define TRACE_RANGE_OPS
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/doc_range_ops.h"
@@ -26,39 +26,38 @@
 #include <stdexcept>
 
 #ifdef TRACE_RANGE_OPS
-#include <iostream>
+  #include <iostream>
 #endif
 
 namespace app {
 
 enum Op { Move, Copy };
 
-static void move_or_copy_cels(
-  DocApi& api, Op op,
-  const LayerList& srcLayers,
-  const LayerList& dstLayers,
-  const SelectedFrames& srcFrames,
-  const SelectedFrames& dstFrames)
+static void move_or_copy_cels(DocApi& api,
+                              Op op,
+                              const LayerList& srcLayers,
+                              const LayerList& dstLayers,
+                              const SelectedFrames& srcFrames,
+                              const SelectedFrames& dstFrames)
 {
   ASSERT(srcLayers.size() == dstLayers.size());
 
-  for (layer_t i=0; i<srcLayers.size(); ++i) {
+  for (layer_t i = 0; i < srcLayers.size(); ++i) {
     auto srcFrame = srcFrames.begin();
     auto dstFrame = dstFrames.begin();
     auto srcFrameEnd = srcFrames.end();
     auto dstFrameEnd = dstFrames.end();
 
-    for (; srcFrame != srcFrameEnd &&
-           dstFrame != dstFrameEnd; ++srcFrame, ++dstFrame) {
-      if (i >= 0 && i < srcLayers.size() && srcLayers[i]->isImage()) {
-        LayerImage* srcLayer = static_cast<LayerImage*>(srcLayers[i]);
+    for (; srcFrame != srcFrameEnd && dstFrame != dstFrameEnd; ++srcFrame, ++dstFrame) {
+      if (i >= 0 && i < srcLayers.size() && srcLayers[i]->acceptCels()) {
+        Layer* srcLayer = srcLayers[i];
 
-        if (i < dstLayers.size() && dstLayers[i]->isImage()) {
-          LayerImage* dstLayer = static_cast<LayerImage*>(dstLayers[i]);
+        if (i < dstLayers.size() && dstLayers[i]->acceptCels()) {
+          Layer* dstLayer = dstLayers[i];
 
 #ifdef TRACE_RANGE_OPS
-          std::clog << (op == Move ? "Moving": "Copying")
-                    << " cel " << srcLayer->name() << "[" << *srcFrame << "]"
+          std::clog << (op == Move ? "Moving" : "Copying") << " cel " << srcLayer->name() << "["
+                    << *srcFrame << "]"
                     << " into " << dstLayer->name() << "[" << *dstFrame << "]\n";
 #endif
 
@@ -77,13 +76,13 @@ static void move_or_copy_cels(
   }
 }
 
-static DocRange move_or_copy_frames(
-  DocApi& api, Op op,
-  Sprite* sprite,
-  const DocRange& srcRange,
-  frame_t dstFrame,
-  const DocRangePlace place,
-  const TagsHandling tagsHandling)
+static DocRange move_or_copy_frames(DocApi& api,
+                                    Op op,
+                                    Sprite* sprite,
+                                    const DocRange& srcRange,
+                                    frame_t dstFrame,
+                                    const DocRangePlace place,
+                                    const TagsHandling tagsHandling)
 {
   const SelectedFrames& srcFrames = srcRange.selectedFrames();
 
@@ -93,9 +92,9 @@ static DocRange move_or_copy_frames(
     std::clog << srcFrame << ", ";
   }
   std::clog << "] "
-            << (place == kDocRangeBefore ? "before":
-                place == kDocRangeAfter ? "after":
-                                          "as first child")
+            << (place == kDocRangeBefore ? "before" :
+                place == kDocRangeAfter  ? "after" :
+                                           "as first child")
             << " " << dstFrame << "\n";
 #endif
 
@@ -103,15 +102,12 @@ static DocRange move_or_copy_frames(
   auto srcFrameEnd = srcFrames.end();
   frame_t srcDelta = 0;
   frame_t firstCopiedBlock = 0;
-  frame_t dstBeforeFrame =
-    (place == kDocRangeBefore ? dstFrame:
-                                dstFrame+1);
+  frame_t dstBeforeFrame = (place == kDocRangeBefore ? dstFrame : dstFrame + 1);
 
   for (; srcFrame != srcFrameEnd; ++srcFrame) {
-    frame_t fromFrame = (*srcFrame)+srcDelta;
+    frame_t fromFrame = (*srcFrame) + srcDelta;
 
     switch (op) {
-
       case Move:
         if ((*srcFrame) >= dstBeforeFrame) {
           srcDelta = 0;
@@ -120,7 +116,7 @@ static DocRange move_or_copy_frames(
         break;
 
       case Copy:
-        if (fromFrame >= dstBeforeFrame-1 && firstCopiedBlock) {
+        if (fromFrame >= dstBeforeFrame - 1 && firstCopiedBlock) {
           srcDelta += firstCopiedBlock;
           fromFrame += firstCopiedBlock;
           firstCopiedBlock = 0;
@@ -130,43 +126,42 @@ static DocRange move_or_copy_frames(
 
 #ifdef TRACE_RANGE_OPS
     std::clog << " [";
-    for (frame_t i=0; i<=sprite->lastFrame(); ++i) {
-      std::clog << (sprite->frameDuration(i)-1);
+    for (frame_t i = 0; i <= sprite->lastFrame(); ++i) {
+      std::clog << (sprite->frameDuration(i) - 1);
     }
-    std::clog << "] => "
-              << (op == Move ? "Move": "Copy")
-              << " " << (*srcFrame) << "+" << (srcDelta)
-              << (place == kDocRangeBefore ? " before ": " after ")
-              << dstFrame << " => ";
+    std::clog << "] => " << (op == Move ? "Move" : "Copy") << " " << (*srcFrame) << "+"
+              << (srcDelta) << (place == kDocRangeBefore ? " before " : " after ") << dstFrame
+              << " => ";
 #endif
 
     switch (op) {
-
       case Move:
-        api.moveFrame(sprite, fromFrame, dstFrame,
-                      (place == kDocRangeBefore ? kDropBeforeFrame:
-                                                  kDropAfterFrame),
+        api.moveFrame(sprite,
+                      fromFrame,
+                      dstFrame,
+                      (place == kDocRangeBefore ? kDropBeforeFrame : kDropAfterFrame),
                       tagsHandling);
 
-        if (fromFrame < dstBeforeFrame-1) {
+        if (fromFrame < dstBeforeFrame - 1) {
           --srcDelta;
         }
-        else if (fromFrame > dstBeforeFrame-1) {
+        else if (fromFrame > dstBeforeFrame - 1) {
           ++dstBeforeFrame;
           ++dstFrame;
         }
         break;
 
       case Copy:
-        api.copyFrame(sprite, fromFrame, dstFrame,
-                      (place == kDocRangeBefore ? kDropBeforeFrame:
-                                                  kDropAfterFrame),
+        api.copyFrame(sprite,
+                      fromFrame,
+                      dstFrame,
+                      (place == kDocRangeBefore ? kDropBeforeFrame : kDropAfterFrame),
                       tagsHandling);
 
-        if (fromFrame < dstBeforeFrame-1) {
+        if (fromFrame < dstBeforeFrame - 1) {
           ++firstCopiedBlock;
         }
-        else if (fromFrame >= dstBeforeFrame-1) {
+        else if (fromFrame >= dstBeforeFrame - 1) {
           ++srcDelta;
         }
         ++dstBeforeFrame;
@@ -176,8 +171,8 @@ static DocRange move_or_copy_frames(
 
 #ifdef TRACE_RANGE_OPS
     std::clog << " [";
-    for (frame_t i=0; i<=sprite->lastFrame(); ++i) {
-      std::clog << (sprite->frameDuration(i)-1);
+    for (frame_t i = 0; i <= sprite->lastFrame(); ++i) {
+      std::clog << (sprite->frameDuration(i) - 1);
     }
     std::clog << "]\n";
 #endif
@@ -186,39 +181,35 @@ static DocRange move_or_copy_frames(
   DocRange result;
   if (!srcRange.selectedLayers().empty())
     result.selectLayers(srcRange.selectedLayers());
-  result.startRange(nullptr, dstBeforeFrame-srcFrames.size(), DocRange::kFrames);
-  result.endRange(nullptr, dstBeforeFrame-1);
+  result.startRange(nullptr, dstBeforeFrame - srcFrames.size(), DocRange::kFrames);
+  result.endRange(nullptr, dstBeforeFrame - 1);
   return result;
 }
 
-static bool has_child(LayerGroup* parent, Layer* child)
+static bool has_child(Layer* parent, Layer* child)
 {
   for (auto c : parent->layers()) {
     if (c == child)
       return true;
-    else if (c->isGroup() &&
-             has_child(static_cast<LayerGroup*>(c), child))
+    else if (c->isGroup() && has_child(c, child))
       return true;
   }
   return false;
 }
 
-static DocRange drop_range_op(
-  Doc* doc,
-  const Op op,
-  const DocRange& from,
-  DocRangePlace place,
-  const TagsHandling tagsHandling,
-  DocRange to)
+static DocRange drop_range_op(Doc* doc,
+                              const Op op,
+                              const DocRange& from,
+                              DocRangePlace place,
+                              const TagsHandling tagsHandling,
+                              DocRange to)
 {
   // Convert "first child" operation into a insert after last child.
-  LayerGroup* parent = nullptr;
-  if (to.type() == DocRange::kLayers &&
-      !to.selectedLayers().empty()) {
-    if (place == kDocRangeFirstChild &&
-        (*to.selectedLayers().begin())->isGroup()) {
+  Layer* parent = nullptr;
+  if (to.type() == DocRange::kLayers && !to.selectedLayers().empty()) {
+    if (place == kDocRangeFirstChild) {
       place = kDocRangeAfter;
-      parent = static_cast<LayerGroup*>((*to.selectedLayers().begin()));
+      parent = *to.selectedLayers().begin();
 
       to.clearRange();
       to.startRange(parent->lastLayer(), -1, DocRange::kLayers);
@@ -230,15 +221,12 @@ static DocRange drop_range_op(
 
     // Check that we're not moving a group inside itself
     for (auto moveThis : from.selectedLayers()) {
-      if (moveThis == parent ||
-          (moveThis->isGroup() &&
-           has_child(static_cast<LayerGroup*>(moveThis), parent)))
+      if (moveThis == parent || (moveThis->isGroup() && has_child(moveThis, parent)))
         return from;
     }
   }
 
-  if (place != kDocRangeBefore &&
-      place != kDocRangeAfter) {
+  if (place != kDocRangeBefore && place != kDocRangeAfter) {
     ASSERT(false);
     throw std::invalid_argument("Invalid 'place' argument");
   }
@@ -248,7 +236,6 @@ static DocRange drop_range_op(
   // Check noop/trivial/do nothing cases, i.e., move a range to the same place.
   // Also check invalid cases, like moving a Background layer.
   switch (from.type()) {
-
     case DocRange::kCels:
       if (from == to)
         return from;
@@ -259,13 +246,11 @@ static DocRange drop_range_op(
         // Simple cases with one continuos range of frames that are a
         // no-op.
         if ((from.selectedFrames().ranges() == 1) &&
-            ((to.firstFrame() >= from.firstFrame() &&
-              to.lastFrame() <= from.lastFrame()) ||
-             (place == kDocRangeBefore && to.firstFrame() == from.lastFrame()+1) ||
-             (place == kDocRangeAfter && to.lastFrame() == from.firstFrame()-1)) &&
+            ((to.firstFrame() >= from.firstFrame() && to.lastFrame() <= from.lastFrame()) ||
+             (place == kDocRangeBefore && to.firstFrame() == from.lastFrame() + 1) ||
+             (place == kDocRangeAfter && to.lastFrame() == from.firstFrame() - 1)) &&
             // If there are tags, this might not be a no-op
-            (sprite->tags().empty() ||
-             tagsHandling == kDontAdjustTags)) {
+            (sprite->tags().empty() || tagsHandling == kDontAdjustTags)) {
           return from;
         }
       }
@@ -287,19 +272,14 @@ static DocRange drop_range_op(
         // Check no-ops when we move layers at the same level (all
         // layers with the same parent), all adjacents, and which are
         // moved to the same place.
-        if (!dstSelLayers.empty() &&
-            srcSelLayers.hasSameParent() &&
-            dstSelLayers.hasSameParent() &&
-            are_layers_adjacent(srcLayers) &&
-            are_layers_adjacent(dstLayers)) {
+        if (!dstSelLayers.empty() && srcSelLayers.hasSameParent() && dstSelLayers.hasSameParent() &&
+            are_layers_adjacent(srcLayers) && are_layers_adjacent(dstLayers)) {
           for (Layer* srcLayer : srcLayers)
             if (dstSelLayers.contains(srcLayer))
               return from;
 
-          if ((place == kDocRangeBefore
-               && dstLayers.front() == srcLayers.back()->getNext()) ||
-              (place == kDocRangeAfter
-               && dstLayers.back() == srcLayers.front()->getPrevious()))
+          if ((place == kDocRangeBefore && dstLayers.front() == srcLayers.back()->getNext()) ||
+              (place == kDocRangeAfter && dstLayers.back() == srcLayers.front()->getPrevious()))
             return from;
         }
 
@@ -313,7 +293,8 @@ static DocRange drop_range_op(
       if (place == kDocRangeBefore) {
         for (Layer* background : to.selectedLayers()) {
           if (background && background->isBackground())
-            throw std::runtime_error("You cannot move or copy something below the background layer");
+            throw std::runtime_error(
+              "You cannot move or copy something below the background layer");
         }
       }
       break;
@@ -323,9 +304,7 @@ static DocRange drop_range_op(
   switch (op) {
     case Move: undoLabel = "Move Range"; break;
     case Copy: undoLabel = "Copy Range"; break;
-    default:
-      ASSERT(false);
-      throw std::invalid_argument("Invalid 'op' argument");
+    default:   ASSERT(false); throw std::invalid_argument("Invalid 'op' argument");
   }
   DocRange resultRange;
 
@@ -341,7 +320,6 @@ static DocRange drop_range_op(
     // DocApi::setCelFramePosition() function).
 
     switch (from.type()) {
-
       case DocRange::kCels: {
         LayerList allLayers = sprite->allBrowsableLayers();
         if (allLayers.empty())
@@ -349,8 +327,7 @@ static DocRange drop_range_op(
 
         LayerList srcLayers = from.selectedLayers().toBrowsableLayerList();
         LayerList dstLayers = to.selectedLayers().toBrowsableLayerList();
-        if (srcLayers.empty() ||
-            dstLayers.empty())
+        if (srcLayers.empty() || dstLayers.empty())
           throw std::invalid_argument("You need to specify a non-empty cels range");
 
         if (find_layer_index(allLayers, srcLayers.front()) <
@@ -383,9 +360,7 @@ static DocRange drop_range_op(
         else
           dstFrame = to.lastFrame();
 
-        resultRange = move_or_copy_frames(api, op, sprite,
-                                          from, dstFrame,
-                                          place, tagsHandling);
+        resultRange = move_or_copy_frames(api, op, sprite, from, dstFrame, place, tagsHandling);
         break;
       }
 
@@ -399,11 +374,10 @@ static DocRange drop_range_op(
         ASSERT(!srcLayers.empty());
 
         switch (op) {
-
           case Move:
             if (place == kDocRangeBefore) {
-              Layer* beforeThis = (!dstLayers.empty() ? dstLayers.front(): nullptr);
-              Layer* afterThis  = nullptr;
+              Layer* beforeThis = (!dstLayers.empty() ? dstLayers.front() : nullptr);
+              Layer* afterThis = nullptr;
 
               for (Layer* srcLayer : srcLayers) {
                 if (afterThis)
@@ -415,7 +389,7 @@ static DocRange drop_range_op(
               }
             }
             else if (place == kDocRangeAfter) {
-              Layer* afterThis = (!dstLayers.empty() ? dstLayers.back(): nullptr);
+              Layer* afterThis = (!dstLayers.empty() ? dstLayers.back() : nullptr);
               for (Layer* srcLayer : srcLayers) {
                 api.restackLayerAfter(srcLayer, parent, afterThis);
                 afterThis = srcLayer;
@@ -428,10 +402,9 @@ static DocRange drop_range_op(
 
           case Copy: {
             if (place == kDocRangeBefore) {
-              Layer* beforeThis = (!dstLayers.empty() ? dstLayers.front(): nullptr);
-              for (Layer* srcLayer :  srcLayers) {
-                Layer* copiedLayer = api.duplicateLayerBefore(
-                  srcLayer, parent, beforeThis);
+              Layer* beforeThis = (!dstLayers.empty() ? dstLayers.front() : nullptr);
+              for (Layer* srcLayer : srcLayers) {
+                Layer* copiedLayer = api.duplicateLayerBefore(srcLayer, parent, beforeThis);
 
                 resultRange.startRange(copiedLayer, -1, DocRange::kLayers);
                 resultRange.endRange(copiedLayer, -1);
@@ -440,10 +413,9 @@ static DocRange drop_range_op(
             else if (place == kDocRangeAfter) {
               std::reverse(srcLayers.begin(), srcLayers.end());
 
-              Layer* afterThis = (!dstLayers.empty() ? dstLayers.back(): nullptr);
-              for (Layer* srcLayer :  srcLayers) {
-                Layer* copiedLayer = api.duplicateLayerAfter(
-                  srcLayer, parent, afterThis);
+              Layer* afterThis = (!dstLayers.empty() ? dstLayers.back() : nullptr);
+              for (Layer* srcLayer : srcLayers) {
+                Layer* copiedLayer = api.duplicateLayerAfter(srcLayer, parent, afterThis);
 
                 resultRange.startRange(copiedLayer, -1, DocRange::kLayers);
                 resultRange.endRange(copiedLayer, -1);
@@ -471,8 +443,7 @@ DocRange move_range(Doc* doc,
                     const DocRangePlace place,
                     const TagsHandling tagsHandling)
 {
-  return drop_range_op(doc, Move, from, place,
-                       tagsHandling, DocRange(to));
+  return drop_range_op(doc, Move, from, place, tagsHandling, DocRange(to));
 }
 
 DocRange copy_range(Doc* doc,
@@ -481,8 +452,7 @@ DocRange copy_range(Doc* doc,
                     const DocRangePlace place,
                     const TagsHandling tagsHandling)
 {
-  return drop_range_op(doc, Copy, from, place,
-                       tagsHandling, DocRange(to));
+  return drop_range_op(doc, Copy, from, place, tagsHandling, DocRange(to));
 }
 
 void reverse_frames(Doc* doc, const DocRange& range)
@@ -513,35 +483,26 @@ void reverse_frames(Doc* doc, const DocRange& range)
       break;
     case DocRange::kLayers:
       frameBegin = frame_t(0);
-      frameEnd = sprite->totalFrames()-1;
+      frameEnd = sprite->totalFrames() - 1;
       layers = range.selectedLayers().toBrowsableLayerList();
       swapCels = true;
       break;
   }
 
   if (moveFrames) {
-    for (frame_t frameRev = frameEnd+1;
-         frameRev > frameBegin;
-         --frameRev) {
-      api.moveFrame(sprite, frameBegin, frameRev,
-                    kDropBeforeFrame,
-                    kDontAdjustTags);
+    for (frame_t frameRev = frameEnd + 1; frameRev > frameBegin; --frameRev) {
+      api.moveFrame(sprite, frameBegin, frameRev, kDropBeforeFrame, kDontAdjustTags);
     }
   }
   else if (swapCels) {
     for (Layer* layer : layers) {
-      if (!layer->isImage())
-        continue;
-
-      for (frame_t frame = frameBegin,
-             frameRev = frameEnd;
-           frame != (frameBegin+frameEnd)/2+1;
+      for (frame_t frame = frameBegin, frameRev = frameEnd;
+           frame != (frameBegin + frameEnd) / 2 + 1;
            ++frame, --frameRev) {
         if (frame == frameRev)
           continue;
 
-        LayerImage* imageLayer = static_cast<LayerImage*>(layer);
-        api.swapCel(imageLayer, frame, frameRev);
+        api.swapCel(layer, frame, frameRev);
       }
     }
   }

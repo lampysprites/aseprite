@@ -1,4 +1,5 @@
 // Aseprite
+// Copyright (C) 2016-2026  Igara Studio S.A.
 // Copyright (C) 2001-2015  David Capello
 //
 // This program is distributed under the terms of
@@ -7,113 +8,102 @@
 #define APP_TILED_MODE_H_INCLUDED
 #pragma once
 
+#include "app/transformation.h"
+#include "doc/sprite.h"
 #include "filters/tiled_mode.h"
-
-#include "app/doc.h"
-#include "gfx/region.h"
 #include "render/projection.h"
+
+using namespace filters;
 
 namespace app {
 
-  class TiledModeHelper {
-  public:
-    TiledModeHelper(const filters::TiledMode mode, const doc::Sprite* canvas) :
-      m_mode(mode),
-      m_canvas(canvas) {
-    }
-    ~TiledModeHelper() {}
+class TiledModeHelper {
+public:
+  TiledModeHelper(const filters::TiledMode mode, const doc::Sprite* canvas)
+    : m_mode(mode)
+    , m_canvas(canvas)
+  {
+  }
 
-    void mode(const filters::TiledMode mode) {
-      m_mode = mode;
-    }
+  ~TiledModeHelper() {}
 
-    gfx::Size canvasSize() const {
-      gfx::Size sz(m_canvas->width(),
-                   m_canvas->height());
-      if (int(m_mode) & int(filters::TiledMode::X_AXIS)) {
-        sz.w += sz.w * 2;
-      }
-      if (int(m_mode) & int(filters::TiledMode::Y_AXIS)) {
-        sz.h += sz.h * 2;
-      }
-      return sz;
-    }
+  void mode(const filters::TiledMode mode) { m_mode = mode; }
 
-    gfx::Point mainTilePosition() const {
-      gfx::Point pt(0, 0);
-      if (int(m_mode) & int(filters::TiledMode::X_AXIS)) {
-        pt.x += m_canvas->width();
-      }
-      if (int(m_mode) & int(filters::TiledMode::Y_AXIS)) {
-        pt.y += m_canvas->height();
-      }
-      return pt;
-    }
+  bool hasModeFlag(filters::TiledMode mode) const { return (int(m_mode) & int(mode)) == int(mode); }
 
-    void expandRegionByTiledMode(gfx::Region& rgn,
-                                 const render::Projection* proj = nullptr) const {
-      gfx::Region tile = rgn;
-      const bool xTiled = (int(m_mode) & int(filters::TiledMode::X_AXIS));
-      const bool yTiled = (int(m_mode) & int(filters::TiledMode::Y_AXIS));
-      int w = m_canvas->width();
-      int h = m_canvas->height();
-      if (proj) {
-        w = proj->applyX(w);
-        h = proj->applyY(h);
-      }
-      if (xTiled) {
-        tile.offset(w, 0); rgn |= tile;
-        tile.offset(w, 0); rgn |= tile;
-        tile.offset(-2 * w, 0);
-      }
-      if (yTiled) {
-        tile.offset(0, h); rgn |= tile;
-        tile.offset(0, h); rgn |= tile;
-        tile.offset(0, -2 * h);
-      }
-      if (xTiled && yTiled) {
-        tile.offset(w, h); rgn |= tile;
-        tile.offset(w, 0); rgn |= tile;
-        tile.offset(-w, h); rgn |= tile;
-        tile.offset(w, 0); rgn |= tile;
-      }
-    }
+  // Returns true if some of the tiled modes are enabled.
+  bool tiledEnabled() const
+  {
+    return hasModeFlag(TiledMode::X_AXIS) || hasModeFlag(TiledMode::Y_AXIS);
+  }
 
-    void collapseRegionByTiledMode(gfx::Region& rgn) const {
-      auto canvasSize = this->canvasSize();
-      rgn &= gfx::Region(gfx::Rect(canvasSize));
+  gfx::Size canvasSize() const;
 
-      const int sprW = m_canvas->width();
-      const int sprH = m_canvas->height();
+  gfx::Point mainTilePosition() const;
 
-      gfx::Region newRgn;
-      for (int v = 0; v < canvasSize.h; v += sprH) {
-        for (int u = 0; u < canvasSize.w; u += sprW) {
-          gfx::Region tmp(gfx::Rect(u, v, sprW, sprH));
-          tmp &= rgn;
-          tmp.offset(-u, -v);
-          newRgn |= tmp;
-        }
-      }
-      rgn = newRgn;
-    }
+  void expandRegionByTiledMode(gfx::Region& rgn, const render::Projection* proj = nullptr) const;
 
-    void wrapPosition(gfx::Region& rgn) const {
-      if (int(m_mode) == int(filters::TiledMode::NONE))
-        return;
+  void collapseRegionByTiledMode(gfx::Region& rgn) const;
 
-      if (int(m_mode) & int(filters::TiledMode::X_AXIS))
-        rgn.offset(m_canvas->width() * (1 - (rgn.bounds().x / m_canvas->width())), 0);
+  void wrapPosition(gfx::Region& rgn) const;
 
-      if (int(m_mode) & int(filters::TiledMode::Y_AXIS))
-        rgn.offset(0, m_canvas->height() * (1 - (rgn.bounds().y / m_canvas->height())));
-    }
+  // Wraps around the position of the transformation according to the canvas size,
+  // including its pivot.
+  void wrapTransformation(Transformation* transformation) const;
 
-  private:
-    filters::TiledMode m_mode;
-    const doc::Sprite* m_canvas;
+  // Draws copies of the image at the center of the dst Image over itself according
+  // to the current tiled mode. It accommodates the copies at each side/corner as needed.
+  // IMPORTANT: For using this function properly, the dst Image must have the
+  // appropriate width and height, as shown in the following examples:
+  // For the following dst images and a m_canvas with size `cw` and `ch`, depending
+  // on the current tiled mode:
+  //   dst Image for tiled mode BOTH:             dst Image for tiled mode Y_AXIS:
+  // +-------------------------------------+          +-------+
+  // |                  A                  |          |   A   |
+  // |                  |                  |          |   |   |
+  // |                  |                  |          |   |   |
+  // |                  ch                 |          |   ch  |
+  // |                  |                  |          |   |   |
+  // |                  V                  |          |   V   |
+  // |              +-------+              |          +-------+
+  // |              |       |              |          |       |
+  // |<---- cw ---->|  img  |<---- cw ---->|          |  img  |
+  // |              |       |              |          |       |
+  // |              +-------+              |          +-------+
+  // |                  A                  |          |   A   |
+  // |                  |                  |          |   |   |
+  // |                  |                  |          |   |   |
+  // |                  ch                 |          |   ch  |
+  // |                  |                  |          |   |   |
+  // |                  V                  |          |   V   |
+  // +-------------------------------------+          +-------+
+  //
+  // After using this function:
+  // +-------+------+-------+------+-------+          +-------+
+  // |  img  |      |  img  |      |  img  |          |  img  |
+  // |  copy |      |  copy |      |  copy |          |  copy |
+  // |       |      |       |      |       |          |       |
+  // +-------+      +-------+      +-------+          +-------+
+  // |                                     |          |       |
+  // |                                     |          |       |
+  // +-------+      +-------+      +-------+          +-------+
+  // |  img  |      |       |      |  img  |          |       |
+  // |  copy |      |  img  |      |  copy |          |  img  |
+  // |       |      |       |      |       |          |       |
+  // +-------+      +-------+      +-------+          +-------+
+  // |                                     |          |       |
+  // |                                     |          |       |
+  // +-------+      +-------+      +-------+          +-------+
+  // |  img  |      |  img  |      |  img  |          |  img  |
+  // |  copy |      |  copy |      |  copy |          |  copy |
+  // |       |      |       |      |       |          |       |
+  // +-------+------+-------+------+-------+          +-------+
+  void drawTiled(doc::Image* dst, const gfx::Rect& unexpandedBounds) const;
 
-  };
+private:
+  filters::TiledMode m_mode;
+  const doc::Sprite* m_canvas;
+};
 
 } // namespace app
 

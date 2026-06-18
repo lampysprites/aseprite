@@ -1,17 +1,18 @@
 // Aseprite UI Library
-// Copyright (C) 2019-2024  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2016  David Capello
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "ui/slider.h"
 
-#include "os/font.h"
+#include "base/time.h"
+#include "text/font.h"
 #include "ui/message.h"
 #include "ui/size_hint_event.h"
 #include "ui/system.h"
@@ -70,9 +71,12 @@ void Slider::setValue(int value)
 
 void Slider::getSliderThemeInfo(int* min, int* max, int* value) const
 {
-  if (min) *min = m_min;
-  if (max) *max = m_max;
-  if (value) *value = m_value;
+  if (min)
+    *min = m_min;
+  if (max)
+    *max = m_max;
+  if (value)
+    *value = m_value;
 }
 
 void Slider::updateValue(int value)
@@ -103,7 +107,6 @@ int Slider::convertTextToValue(const std::string& text) const
 bool Slider::onProcessMessage(Message* msg)
 {
   switch (msg->type()) {
-
     case kFocusEnterMessage:
     case kFocusLeaveMessage:
       if (isEnabled())
@@ -132,28 +135,27 @@ bool Slider::onProcessMessage(Message* msg)
 
     case kMouseMoveMessage:
       if (hasCapture()) {
-        int min, max, value, range;
-        gfx::Rect rc = childrenBounds();
-        gfx::Point mousePos = static_cast<MouseMessage*>(msg)->positionForDisplay(display());
-
+        const gfx::Rect rc = childrenBounds();
+        const gfx::Point mousePos = static_cast<MouseMessage*>(msg)->positionForDisplay(display());
+        int min, max, value;
         getSliderThemeInfo(&min, &max, &value);
 
-        range =  max - min + 1;
+        int range = max - min + 1;
+        int w = rc.w;
 
         // With left click
         if (slider_press_left) {
-          value = min + range * (mousePos.x - rc.x) / rc.w;
+          if (w == 0)
+            w = 1;
+          value = min + range * (mousePos.x - rc.x) / w;
         }
         // With right click
         else {
-          int w = rc.w;
-          if (rc.w == 0 || range > rc.w) {
+          if (w == 0 || range > w) {
             w = 1;
             range = 1;
           }
-
-          value = slider_press_value +
-            (mousePos.x - slider_press_x) * range / w;
+          value = slider_press_value + (mousePos.x - slider_press_x) * range / w;
         }
 
         value = std::clamp(value, min, max);
@@ -188,20 +190,53 @@ bool Slider::onProcessMessage(Message* msg)
         int min, max, value, oldValue;
         getSliderThemeInfo(&min, &max, &value);
         oldValue = value;
+        if (base::current_tick() - m_keyTiming > 1500) {
+          m_keyBuffer.clear();
+          m_keyTiming = base::current_tick();
+        }
 
-        switch (static_cast<KeyMessage*>(msg)->scancode()) {
-          case kKeyLeft:     --value; break;
-          case kKeyRight:    ++value; break;
-          case kKeyPageDown: value -= (max-min+1)/4; break;
-          case kKeyPageUp:   value += (max-min+1)/4; break;
-          case kKeyHome:     value = min; break;
-          case kKeyEnd:      value = max; break;
-          default:
+        auto* keyMessage = static_cast<KeyMessage*>(msg);
+        switch (keyMessage->scancode()) {
+          case kKeyLeft:      --value; break;
+          case kKeyRight:     ++value; break;
+          case kKeyPageDown:  value -= (max - min + 1) / 4; break;
+          case kKeyPageUp:    value += (max - min + 1) / 4; break;
+          case kKeyHome:      value = min; break;
+          case kKeyEnd:       value = max; break;
+          case kKeyBackspace: {
+            // Handles deleting numbers like it was text.
+            // When the min is not negative, we can backspace down to zero, but when
+            // the min can go beyond that, we backspace once more to go to the actual minimum.
+            auto valueString = std::to_string(value);
+
+            if (valueString.length() == 1 || (value < 0 && valueString.length() == 2) ||
+                value == min)
+              value = (value > 0 && min < 0) ? 0 : min;
+            else
+              value = std::stoi(valueString.substr(0, valueString.size() - 1));
+          } break;
+        }
+
+        if (oldValue == value) {
+          m_keyBuffer = m_keyBuffer + base::codepoint_to_utf8(keyMessage->unicodeChar());
+
+          // Allows typing in negative numbers.
+          if (m_keyBuffer == "-")
+            return true;
+
+          try {
+            value = std::stoi(m_keyBuffer);
+          }
+          catch (...) {
+            // Undo the latest character we failed to convert it to a number.
+            m_keyBuffer.pop_back();
             goto not_used;
+          }
         }
 
         value = std::clamp(value, min, max);
         if (oldValue != value) {
+          m_keyBuffer = std::to_string(value);
           updateValue(value);
           onChange();
         }
@@ -212,9 +247,8 @@ bool Slider::onProcessMessage(Message* msg)
 
     case kMouseWheelMessage:
       if (isEnabled() && !isReadOnly()) {
-        int value = m_value
-          + static_cast<MouseMessage*>(msg)->wheelDelta().x
-          - static_cast<MouseMessage*>(msg)->wheelDelta().y;
+        int value = m_value + static_cast<MouseMessage*>(msg)->wheelDelta().x -
+                    static_cast<MouseMessage*>(msg)->wheelDelta().y;
 
         value = std::clamp(value, m_min, m_max);
 
@@ -226,9 +260,7 @@ bool Slider::onProcessMessage(Message* msg)
       }
       break;
 
-    case kSetCursorMessage:
-      setupSliderCursor();
-      return true;
+    case kSetCursorMessage: setupSliderCursor(); return true;
   }
 
 not_used:;

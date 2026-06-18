@@ -1,4 +1,5 @@
 // Aseprite UI Library
+// Copyright (C) 2025  Igara Studio S.A.
 // Copyright (C) 2018  David Capello
 //
 // This file is released under the terms of the MIT license.
@@ -12,12 +13,13 @@
 
 namespace ui {
 
-  class ClipboardDelegate {
-  public:
-    virtual ~ClipboardDelegate() { }
-    virtual void setClipboardText(const std::string& text) = 0;
-    virtual bool getClipboardText(std::string& text) = 0;
-  };
+class ClipboardDelegate {
+public:
+  virtual ~ClipboardDelegate() {}
+  virtual void setClipboardText(const std::string& text) = 0;
+  virtual bool getClipboardText(std::string& text) = 0;
+  virtual bool hasClipboardText() = 0;
+};
 
 } // namespace ui
 

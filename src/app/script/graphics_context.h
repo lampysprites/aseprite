@@ -1,5 +1,5 @@
 // Aseprite
-// Copyright (c) 2022-2023  Igara Studio S.A.
+// Copyright (c) 2022-2024  Igara Studio S.A.
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
@@ -8,22 +8,20 @@
 #define APP_SCRIPT_GRAPHICS_CONTEXT_H_INCLUDED
 #pragma once
 
-#ifdef ENABLE_UI
-
 #include "doc/palette.h"
+#include "doc/pixel_format.h"
 #include "gfx/path.h"
-#include "os/font.h"
 #include "os/paint.h"
 #include "os/surface.h"
+#include "text/font.h"
 
 #include <stack>
 
 namespace doc {
-  class Image;
+class Image;
 }
 
-namespace app {
-namespace script {
+namespace app { namespace script {
 
 class GraphicsContext {
 private:
@@ -33,17 +31,37 @@ private:
   };
 
 public:
-  GraphicsContext(const os::SurfaceRef& surface, int uiscale) : m_surface(surface), m_uiscale(uiscale) { }
-  GraphicsContext(GraphicsContext&& gc) {
+  GraphicsContext(const os::SurfaceRef& surface,
+                  int uiscale,
+                  doc::PixelFormat formatHint = doc::PixelFormat::IMAGE_RGB)
+    : m_surface(surface)
+    , m_uiscale(uiscale)
+    , m_formatHint(formatHint)
+  {
+  }
+  GraphicsContext(const GraphicsContext& gc)
+  {
+    m_surface = gc.m_surface;
+    m_font = gc.m_font;
+    m_paint = gc.m_paint;
+    m_palette = gc.m_palette;
+    m_path = gc.m_path;
+    m_saved = gc.m_saved;
+    m_formatHint = gc.m_formatHint;
+    m_uiscale = gc.m_uiscale;
+  }
+  GraphicsContext(GraphicsContext&& gc) noexcept
+  {
     std::swap(m_surface, gc.m_surface);
     std::swap(m_paint, gc.m_paint);
     std::swap(m_font, gc.m_font);
     std::swap(m_path, gc.m_path);
+    m_formatHint = gc.m_formatHint;
     m_uiscale = gc.m_uiscale;
   }
 
-  os::FontRef font() const { return m_font; }
-  void font(const os::FontRef& font) { m_font = font; }
+  text::FontRef font() const { return m_font; }
+  void font(const text::FontRef& font) { m_font = font; }
 
   doc::Palette* palette() const { return m_palette; }
   void palette(doc::Palette* palette) { m_palette = palette; }
@@ -51,12 +69,14 @@ public:
   int width() const { return m_surface->width(); }
   int height() const { return m_surface->height(); }
 
-  void save() {
-    m_saved.push(State{m_paint, m_palette});
+  void save()
+  {
+    m_saved.push(State{ m_paint, m_palette });
     m_surface->save();
   }
 
-  void restore() {
+  void restore()
+  {
     if (!m_saved.empty()) {
       auto state = m_saved.top();
       m_paint = state.paint;
@@ -70,7 +90,7 @@ public:
   void antialias(bool value) { m_paint.antialias(value); }
 
   gfx::Color color() const { return m_paint.color(); }
-  void color(gfx::Color color) { m_paint.color(color); }
+  void color(gfx::Color color);
 
   float strokeWidth() const { return m_paint.strokeWidth(); }
   void strokeWidth(float value) { m_paint.strokeWidth(value); }
@@ -80,18 +100,20 @@ public:
   void opacity(int value) { m_paint.skPaint().setAlpha(value); }
 #else
   int opacity() const { return 255; }
-  void opacity(int) { }
+  void opacity(int) {}
 #endif
 
   os::BlendMode blendMode() const { return m_paint.blendMode(); }
   void blendMode(const os::BlendMode bm) { m_paint.blendMode(bm); }
 
-  void strokeRect(const gfx::Rect& rc) {
+  void strokeRect(const gfx::Rect& rc)
+  {
     m_paint.style(os::Paint::Stroke);
     m_surface->drawRect(rc, m_paint);
   }
 
-  void fillRect(const gfx::Rect& rc) {
+  void fillRect(const gfx::Rect& rc)
+  {
     m_paint.style(os::Paint::Fill);
     m_surface->drawRect(rc, m_paint);
   }
@@ -100,9 +122,7 @@ public:
   gfx::Size measureText(const std::string& text) const;
 
   void drawImage(const doc::Image* img, int x, int y);
-  void drawImage(const doc::Image* img,
-                 const gfx::Rect& srcRc,
-                 const gfx::Rect& dstRc);
+  void drawImage(const doc::Image* img, const gfx::Rect& srcRc, const gfx::Rect& dstRc);
 
   void drawThemeImage(const std::string& partId, const gfx::Point& pt);
   void drawThemeRect(const std::string& partId, const gfx::Rect& rc);
@@ -112,43 +132,35 @@ public:
   void closePath() { m_path.close(); }
   void moveTo(float x, float y) { m_path.moveTo(x, y); }
   void lineTo(float x, float y) { m_path.lineTo(x, y); }
-  void cubicTo(float cp1x, float cp1y, float cp2x, float cp2y, float x, float y) {
+  void cubicTo(float cp1x, float cp1y, float cp2x, float cp2y, float x, float y)
+  {
     m_path.cubicTo(cp1x, cp1y, cp2x, cp2y, x, y);
   }
-  void oval(const gfx::Rect& rc) {
-    m_path.oval(rc);
-  }
-  void rect(const gfx::Rect& rc) {
-    m_path.rect(rc);
-  }
-  void roundedRect(const gfx::Rect& rc, float rx, float ry) {
-    m_path.roundedRect(rc, rx, ry);
-  }
+  void oval(const gfx::Rect& rc) { m_path.oval(rc); }
+  void rect(const gfx::Rect& rc) { m_path.rect(rc); }
+  void roundedRect(const gfx::Rect& rc, float rx, float ry) { m_path.roundedRect(rc, rx, ry); }
   void stroke();
   void fill();
 
-  void clip() {
-    m_surface->clipPath(m_path);
-  }
+  void clip() { m_surface->clipPath(m_path); }
 
-  int uiscale() const {
-    return m_uiscale;
-  }
+  int uiscale() const { return m_uiscale; }
+
+  doc::PixelFormat formatHint() const { return m_formatHint; }
 
 private:
   os::SurfaceRef m_surface = nullptr;
   // Keeps the UI Scale currently in use when canvas autoScaling is enabled.
   int m_uiscale;
   os::Paint m_paint;
-  os::FontRef m_font;
+  text::FontRef m_font;
   gfx::Path m_path;
   std::stack<State> m_saved;
   doc::Palette* m_palette = nullptr;
+  // Pixel format hint about the underlying pixels wrapped by m_surface.
+  doc::PixelFormat m_formatHint = doc::PixelFormat::IMAGE_RGB;
 };
 
-} // namespace script
-} // namespace app
-
-#endif
+}} // namespace app::script
 
 #endif

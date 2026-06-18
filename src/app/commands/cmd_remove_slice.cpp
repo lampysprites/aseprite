@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019-2020  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2017-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -15,15 +15,13 @@
 #include "app/commands/command.h"
 #include "app/context_access.h"
 #include "app/i18n/strings.h"
-#include "app/modules/gui.h"
+#include "app/pref/preferences.h"
 #include "app/tx.h"
 #include "app/ui/status_bar.h"
 #include "base/convert_to.h"
 #include "doc/selected_objects.h"
 #include "doc/slice.h"
 #include "doc/sprite.h"
-#include "fmt/format.h"
-#include "ui/alert.h"
 #include "ui/widget.h"
 
 namespace app {
@@ -42,8 +40,7 @@ private:
   ObjectId m_sliceId;
 };
 
-RemoveSliceCommand::RemoveSliceCommand()
-  : Command(CommandId::RemoveSlice(), CmdRecordableFlag)
+RemoveSliceCommand::RemoveSliceCommand() : Command(CommandId::RemoveSlice())
 {
 }
 
@@ -61,8 +58,7 @@ void RemoveSliceCommand::onLoadParams(const Params& params)
 bool RemoveSliceCommand::onEnabled(Context* context)
 {
   return context->checkFlags(ContextFlags::ActiveDocumentIsWritable |
-                             ContextFlags::HasActiveSprite |
-                             ContextFlags::HasActiveLayer);
+                             ContextFlags::HasActiveSprite | ContextFlags::HasActiveLayer);
 }
 
 void RemoveSliceCommand::onExecute(Context* context)
@@ -83,7 +79,7 @@ void RemoveSliceCommand::onExecute(Context* context)
     if (slice)
       slicesToDelete.insert(slice->id());
     else
-      slicesToDelete = reader.site()->selectedSlices();
+      slicesToDelete = reader.site().selectedSlices();
   }
 
   // Nothing to delete
@@ -94,21 +90,22 @@ void RemoveSliceCommand::onExecute(Context* context)
     Slice* slice = slicesToDelete.frontAs<Slice>();
     ASSERT(slice);
     if (slice)
-    sliceName = slice->name();
+      sliceName = slice->name();
   }
 
   {
+    const bool useKeys = Preferences::instance().slices.useKeys();
     ContextWriter writer(reader);
     Doc* document(writer.document());
     Sprite* sprite(writer.sprite());
-    Tx tx(writer, "Remove Slice");
+    Tx tx(writer, Strings::commands_RemoveSlice());
 
     for (auto slice : slicesToDelete.iterateAs<Slice>()) {
       ASSERT(slice);
       if (!slice)
         continue;
 
-      if (slice->size() > 1) {
+      if (useKeys && slice->size() > 1) {
         tx(new cmd::SetSliceKey(slice, frame, SliceKey()));
       }
       else {
@@ -120,15 +117,13 @@ void RemoveSliceCommand::onExecute(Context* context)
     document->notifyGeneralUpdate();
   }
 
-  StatusBar::instance()->invalidate();
-  if (!sliceName.empty())
-    StatusBar::instance()->showTip(
-      1000, fmt::format(Strings::remove_slice_x_removed(), sliceName));
-  else
-    StatusBar::instance()->showTip(
-      1000,
-      fmt::format(Strings::remove_slice_n_slices_removed(),
-                  slicesToDelete.size()));
+  auto* statusBar = StatusBar::instance();
+  if (statusBar && context->isUIAvailable()) {
+    if (!sliceName.empty())
+      statusBar->showTip(1000, Strings::remove_slice_x_removed(sliceName));
+    else
+      statusBar->showTip(1000, Strings::remove_slice_n_slices_removed(slicesToDelete.size()));
+  }
 }
 
 Command* CommandFactory::createRemoveSliceCommand()

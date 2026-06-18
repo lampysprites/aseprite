@@ -5,7 +5,7 @@
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "doc/slices.h"
@@ -17,8 +17,7 @@
 
 namespace doc {
 
-Slices::Slices(Sprite* sprite)
-  : m_sprite(sprite)
+Slices::Slices(Sprite* sprite) : m_sprite(sprite)
 {
 }
 
@@ -32,7 +31,10 @@ Slices::~Slices()
 
 void Slices::add(Slice* slice)
 {
-  m_slices.push_back(slice);
+  // Insert the slice at the begining to display it at the front of the others.
+  // This is useful when duplicating (or copy & pasting) slices, because the
+  // user can drag the new slices instead of the originally selected ones.
+  m_slices.insert(m_slices.begin(), slice);
   slice->setOwner(this);
 }
 

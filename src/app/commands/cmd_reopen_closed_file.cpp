@@ -5,29 +5,25 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
-#include "app/app.h"
 #include "app/commands/command.h"
 #include "app/commands/commands.h"
-#include "app/doc.h"
 #include "app/ui_context.h"
-
-#include <cstdio>
 
 namespace app {
 
 class ReopenClosedFileCommand : public Command {
 public:
   ReopenClosedFileCommand();
+
 protected:
   bool onEnabled(Context* context) override;
   void onExecute(Context* context) override;
 };
 
-ReopenClosedFileCommand::ReopenClosedFileCommand()
-  : Command(CommandId::ReopenClosedFile(), CmdUIOnlyFlag)
+ReopenClosedFileCommand::ReopenClosedFileCommand() : Command(CommandId::ReopenClosedFile())
 {
 }
 

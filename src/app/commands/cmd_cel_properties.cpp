@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2020-2023  Igara Studio S.A.
+// Copyright (C) 2020-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -23,7 +23,6 @@
 #include "app/ui/timeline/timeline.h"
 #include "app/ui/user_data_view.h"
 #include "app/ui_context.h"
-#include "base/mem_utils.h"
 #include "base/scoped_value.h"
 #include "doc/cel.h"
 #include "doc/cels_range.h"
@@ -59,17 +58,17 @@ public:
     : m_timer(250, this)
     , m_userDataView(Preferences::instance().cels.userDataVisibility)
   {
-    opacity()->Change.connect([this]{ onStartTimer(); });
-    zindex()->Change.connect([this]{ onStartTimer(); });
-    userData()->Click.connect([this]{ onToggleUserData(); });
-    m_timer.Tick.connect([this]{ onCommitChange(); });
+    opacity()->Change.connect([this] { onStartTimer(); });
+    zindex()->Change.connect([this] { onStartTimer(); });
+    userData()->Click.connect([this] { onToggleUserData(); });
+    m_timer.Tick.connect([this] { onCommitChange(); });
 
-    m_userDataView.UserDataChange.connect([this]{ onStartTimer(); });
+    m_userDataView.UserDataChange.connect([this] { onStartTimer(); });
 
     // TODO add to Expr widget spin flag to include these widgets in
     //      the same Expr
-    zindexSpin()->ItemChange.connect([this]{
-      int dz = (zindexSpin()->selectedItem() == 0 ? +1: -1);
+    zindexSpin()->ItemChange.connect([this] {
+      int dz = (zindexSpin()->selectedItem() == 0 ? +1 : -1);
       zindex()->setTextf("%d", zindex()->textInt() + dz);
       onStartTimer();
     });
@@ -81,11 +80,10 @@ public:
     UIContext::instance()->add_observer(this);
   }
 
-  ~CelPropertiesWindow() {
-    UIContext::instance()->remove_observer(this);
-  }
+  ~CelPropertiesWindow() { UIContext::instance()->remove_observer(this); }
 
-  void setCel(Doc* doc, Cel* cel) {
+  void setCel(Doc* doc, Cel* cel)
+  {
     if (m_document) {
       m_document->remove_observer(this);
       m_document = nullptr;
@@ -95,44 +93,35 @@ public:
     m_timer.stop();
     m_document = doc;
     m_cel = cel;
-    m_range = App::instance()->timeline()->range();
+    m_range = UIContext::instance()->range();
 
     if (m_document)
       m_document->add_observer(this);
 
     if (countCels() > 0) {
-      m_userDataView.configureAndSet(
-        (m_cel ? m_cel->data()->userData(): UserData()),
-        g_window->propertiesGrid());
+      m_userDataView.configureAndSet((m_cel ? m_cel->data()->userData() : UserData()),
+                                     propertiesGrid());
     }
     else if (!m_cel)
       m_userDataView.setVisible(false, false);
 
-    g_window->expandWindow(gfx::Size(g_window->bounds().w,
-                                     g_window->sizeHint().h));
+    expandWindow(gfx::Size(bounds().w, sizeHint().h));
     updateFromCel();
   }
 
 private:
+  int opacityValue() const { return opacity()->getValue(); }
 
-  int opacityValue() const {
-    return opacity()->getValue();
-  }
+  int zindexValue() const { return zindex()->textInt(); }
 
-  int zindexValue() const {
-    return zindex()->textInt();
-  }
-
-  int countCels(int* backgroundCount = nullptr) const {
+  int countCels(int* backgroundCount = nullptr) const
+  {
     if (backgroundCount)
       *backgroundCount = 0;
 
     if (!m_document)
       return 0;
-    else if (m_cel &&
-             (!m_range.enabled() ||
-              (m_range.frames() == 1 &&
-               m_range.layers() == 1))) {
+    else if (m_cel && (!m_range.enabled() || (m_range.frames() == 1 && m_range.layers() == 1))) {
       if (backgroundCount && m_cel->layer()->isBackground())
         *backgroundCount = 1;
       return 1;
@@ -153,15 +142,13 @@ private:
       return 0;
   }
 
-  bool onProcessMessage(ui::Message* msg) override {
+  bool onProcessMessage(ui::Message* msg) override
+  {
     switch (msg->type()) {
-
       case kKeyDownMessage:
-        if (opacity()->hasFocus() ||
-            zindex()->hasFocus()) {
+        if (opacity()->hasFocus() || zindex()->hasFocus()) {
           KeyScancode scancode = static_cast<KeyMessage*>(msg)->scancode();
-          if (scancode == kKeyEnter ||
-              scancode == kKeyEsc) {
+          if (scancode == kKeyEnter || scancode == kKeyEsc) {
             onCommitChange();
             closeWindow(this);
             return true;
@@ -177,12 +164,12 @@ private:
         deferDelete();
         g_window = nullptr;
         break;
-
     }
     return Window::onProcessMessage(msg);
   }
 
-  void onStartTimer() {
+  void onStartTimer()
+  {
     if (m_selfUpdate)
       return;
 
@@ -190,7 +177,8 @@ private:
     m_pendingChanges = true;
   }
 
-  void onCommitChange() {
+  void onCommitChange()
+  {
     // Nothing to change
     if (!m_pendingChanges)
       return;
@@ -204,7 +192,7 @@ private:
     const int newZIndex = std::clamp<int>(zindexValue(),
                                           std::numeric_limits<int16_t>::min(),
                                           std::numeric_limits<int16_t>::max());
-    UserData newUserData= m_userDataView.userData();
+    UserData newUserData = m_userDataView.userData();
 
     const bool opacityChanged = newOpacity != m_lastValues.opacity;
     const bool colorChanged = newUserData.color() != m_lastValues.color;
@@ -212,10 +200,9 @@ private:
 
     const int count = countCels();
 
-    if ((count > 0) ||
-        (count == 1 && m_cel && (newOpacity != m_cel->opacity() ||
-                                 newZIndex != m_cel->zIndex() ||
-                                 newUserData != m_cel->data()->userData()))) {
+    if ((count > 0) || (count == 1 && m_cel &&
+                        (newOpacity != m_cel->opacity() || newZIndex != m_cel->zIndex() ||
+                         newUserData != m_cel->data()->userData()))) {
       try {
         ContextWriter writer(UIContext::instance());
         Tx tx(writer, "Set Cel Properties");
@@ -236,9 +223,7 @@ private:
         // For each unique cel (don't repeat on links)
         for (Cel* cel : sprite->uniqueCels(range.selectedFrames())) {
           if (range.contains(cel->layer())) {
-            if (opacityChanged &&
-                !cel->layer()->isBackground() &&
-                newOpacity != cel->opacity()) {
+            if (opacityChanged && !cel->layer()->isBackground() && newOpacity != cel->opacity()) {
               tx(new cmd::SetCelOpacity(cel, newOpacity));
             }
 
@@ -276,7 +261,7 @@ private:
         m_lastValues.text = newUserData.text();
 
         if (redrawTimeline)
-          App::instance()->timeline()->invalidate();
+          App::instance()->timeline()->invalidate(); // TODO avoid this invalidating in tx.commit()
 
         tx.commit();
       }
@@ -291,46 +276,51 @@ private:
     m_pendingChanges = false;
   }
 
-  void onToggleUserData() {
+  void onToggleUserData()
+  {
     if (countCels() > 0) {
       m_userDataView.toggleVisibility();
-      g_window->expandWindow(gfx::Size(g_window->bounds().w,
-                                       g_window->sizeHint().h));
+      expandWindow(gfx::Size(bounds().w, sizeHint().h));
     }
   }
 
   // ContextObserver impl
-  void onActiveSiteChange(const Site& site) override {
+  void onActiveSiteChange(const Site& site) override
+  {
     onCommitChange();
     if (isVisible())
-      setCel(const_cast<Doc*>(site.document()),
-             const_cast<Cel*>(site.cel()));
+      setCel(const_cast<Doc*>(site.document()), const_cast<Cel*>(site.cel()));
     else if (m_document)
       setCel(nullptr, nullptr);
   }
 
   // DocObserver impl
-  void onBeforeRemoveCel(DocEvent& ev) override {
+  void onBeforeRemoveCel(DocEvent& ev) override
+  {
     if (m_cel == ev.cel())
       setCel(m_document, nullptr);
   }
 
-  void onCelOpacityChange(DocEvent& ev) override {
+  void onCelOpacityChange(DocEvent& ev) override
+  {
     if (m_cel == ev.cel())
       updateFromCel();
   }
 
-  void onCelZIndexChange(DocEvent& ev) override {
+  void onCelZIndexChange(DocEvent& ev) override
+  {
     if (m_cel == ev.cel())
       updateFromCel();
   }
 
-  void onUserDataChange(DocEvent& ev) override {
-     if (m_cel && m_cel->data() == ev.withUserData())
+  void onUserDataChange(DocEvent& ev) override
+  {
+    if (m_cel && m_cel->data() == ev.withUserData())
       updateFromCel();
   }
 
-  void updateFromCel() {
+  void updateFromCel()
+  {
     if (m_selfUpdate)
       return;
 
@@ -352,8 +342,9 @@ private:
         opacity()->setValue(m_cel->opacity());
         zindex()->setTextf("%d", m_cel->zIndex());
         color_t c = m_cel->data()->userData().color();
-        m_userDataView.color()->setColor(Color::fromRgb(rgba_getr(c), rgba_getg(c), rgba_getb(c), rgba_geta(c)));
-        m_userDataView.entry()->setText(m_cel->data()->userData().text());
+        m_userDataView.color()->setColor(
+          Color::fromRgb(rgba_getr(c), rgba_getg(c), rgba_getb(c), rgba_geta(c)));
+        m_userDataView.textEdit()->setText(m_cel->data()->userData().text());
         // Set last filled values in CelPropertiesWindow
         m_lastValues.opacity = m_cel->opacity();
         m_lastValues.zIndex = m_cel->zIndex();
@@ -378,7 +369,7 @@ private:
   bool m_pendingChanges = false;
   Doc* m_document = nullptr;
   Cel* m_cel = nullptr;
-  DocRange m_range;
+  view::RealRange m_range;
   bool m_selfUpdate = false;
   UserDataView m_userDataView;
   CelPropsLastValues m_lastValues;
@@ -393,15 +384,14 @@ protected:
   void onExecute(Context* context) override;
 };
 
-CelPropertiesCommand::CelPropertiesCommand()
-  : Command(CommandId::CelProperties(), CmdUIOnlyFlag)
+CelPropertiesCommand::CelPropertiesCommand() : Command(CommandId::CelProperties())
 {
 }
 
 bool CelPropertiesCommand::onEnabled(Context* context)
 {
-  return context->checkFlags(ContextFlags::ActiveDocumentIsWritable |
-                             ContextFlags::ActiveLayerIsImage);
+  return context->isUIAvailable() &&
+         context->checkFlags(ContextFlags::ActiveDocumentIsWritable | ContextFlags::HasActiveCel);
 }
 
 void CelPropertiesCommand::onExecute(Context* context)

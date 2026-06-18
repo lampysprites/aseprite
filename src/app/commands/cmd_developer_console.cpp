@@ -5,7 +5,7 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #ifndef ENABLE_SCRIPTING
@@ -29,8 +29,7 @@ protected:
   void onExecute(Context* context);
 };
 
-DeveloperConsoleCommand::DeveloperConsoleCommand()
-  : Command(CommandId::DeveloperConsole(), CmdUIOnlyFlag)
+DeveloperConsoleCommand::DeveloperConsoleCommand() : Command(CommandId::DeveloperConsole())
 {
 }
 

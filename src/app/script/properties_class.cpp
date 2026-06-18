@@ -1,11 +1,11 @@
 // Aseprite
-// Copyright (C) 2022-2023  Igara Studio S.A.
+// Copyright (C) 2022-2025  Igara Studio S.A.
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/cmd/set_tile_data_properties.h"
@@ -22,8 +22,7 @@
 
 #include <cstring>
 
-namespace app {
-namespace script {
+namespace app { namespace script {
 
 namespace {
 
@@ -35,28 +34,26 @@ struct Properties {
   doc::tile_index ti = doc::notile;
   std::string extID;
 
-  Properties(const doc::WithUserData* wud,
-             const std::string& extID)
-    : id(wud->id())
-    , extID(extID) {
+  Properties(const doc::WithUserData* wud, const std::string& extID) : id(wud->id()), extID(extID)
+  {
   }
 
-  Properties(const doc::Tileset* ts,
-             const doc::tile_index ti,
-             const std::string& extID)
+  Properties(const doc::Tileset* ts, const doc::tile_index ti, const std::string& extID)
     : id(ts->id())
     , ti(ti)
-    , extID(extID) {
+    , extID(extID)
+  {
   }
 
-  Properties(const Properties& copy,
-             const std::string& extID)
+  Properties(const Properties& copy, const std::string& extID)
     : id(copy.id)
     , ti(copy.ti)
-    , extID(extID) {
+    , extID(extID)
+  {
   }
 
-  doc::WithUserData* object(lua_State* L) {
+  doc::WithUserData* object(lua_State* L)
+  {
     auto obj = static_cast<doc::WithUserData*>(doc::get_object(id));
     if (!obj) {
       // luaL_error never returns
@@ -65,7 +62,8 @@ struct Properties {
     return obj;
   }
 
-  doc::UserData::Properties& properties(lua_State* L, doc::WithUserData* obj = nullptr) {
+  doc::UserData::Properties& properties(lua_State* L, doc::WithUserData* obj = nullptr)
+  {
     if (!obj)
       obj = object(L);
     if (ti == doc::notile) {
@@ -73,13 +71,10 @@ struct Properties {
     }
     else {
       ASSERT(obj->type() == doc::ObjectType::Tileset);
-      return
-        const_cast<doc::UserData*>(
-          &static_cast<doc::Tileset*>(obj)->getTileData(ti))
+      return const_cast<doc::UserData*>(&static_cast<doc::Tileset*>(obj)->getTileData(ti))
         ->properties(extID);
     }
   }
-
 };
 
 using PropertiesIterator = doc::UserData::Properties::iterator;
@@ -124,23 +119,26 @@ int Properties_newindex(lua_State* L)
   auto& properties = propObj->properties(L, obj);
   auto newValue = get_value_from_lua<doc::UserData::Variant>(L, 3);
 
+  // Set property value with undo info
   // TODO add Object::sprite() member function
-  //if (obj->sprite()) {
-  if (auto doc = App::instance()->context()->activeDocument()) {
-    Tx tx(doc);                 // TODO propObj might not be member of "doc"
+  // if (obj->sprite()) {
+  if (Doc* doc = App::instance()->context()->activeDocument(); doc && doc->transaction()) {
+    Tx tx(doc); // TODO propObj might not be member of "doc"
     if (propObj->ti != doc::notile) {
       tx(new cmd::SetTileDataProperty(static_cast<doc::Tileset*>(obj),
-                                      propObj->ti, propObj->extID, field,
+                                      propObj->ti,
+                                      propObj->extID,
+                                      field,
                                       std::move(newValue)));
     }
     else {
-      tx(new cmd::SetUserDataProperty(obj, propObj->extID, field,
-                                      std::move(newValue)));
+      tx(new cmd::SetUserDataProperty(obj, propObj->extID, field, std::move(newValue)));
     }
     tx.commit();
   }
+  // Set property value without undo
   else {
-    properties[field] = std::move(newValue);
+    doc::set_property_value(properties, field, std::move(newValue));
   }
   return 0;
 }
@@ -156,30 +154,43 @@ int Properties_call(lua_State* L)
   //
   //   object.property("extension", { ...})
   //
+  doc::UserData::Properties newProperties;
   if (lua_istable(L, 3)) {
-    auto newProperties = get_value_from_lua<doc::UserData::Properties>(L, 3);
+    newProperties = get_value_from_lua<doc::UserData::Properties>(L, 3);
+  }
+  else if (auto* argProperties = may_get_properties(L, 3)) {
+    newProperties = *argProperties;
+  }
+  else {
+    // Just return the properties
+    push_new<Properties>(L, *propObj, extID);
+    return 1;
+  }
 
-    auto obj = static_cast<doc::WithUserData*>(get_object(propObj->id));
-    if (!obj)
-      return luaL_error(L, "the object with these properties was destroyed");
+  auto obj = static_cast<doc::WithUserData*>(get_object(propObj->id));
+  if (!obj)
+    return luaL_error(L, "the object with these properties was destroyed");
 
-    // TODO add Object::sprite() member function
-    //if (obj->sprite()) {
-    if (auto doc = App::instance()->context()->activeDocument()) {
-      Tx tx(doc);                 // TODO propObj might not be member of "doc"
-      if (propObj->ti != doc::notile) {
-        tx(new cmd::SetTileDataProperties(static_cast<doc::Tileset*>(obj),
-                                          propObj->ti, extID, std::move(newProperties)));
-      }
-      else {
-        tx(new cmd::SetUserDataProperties(obj, extID, std::move(newProperties)));
-      }
-      tx.commit();
+  // TODO add Object::sprite() member function
+  // if (obj->sprite()) {
+  if (Doc* doc = App::instance()->context()->activeDocument(); doc && doc->transaction()) {
+    Tx tx(doc); // TODO propObj might not be member of "doc"
+    if (propObj->ti != doc::notile) {
+      tx(new cmd::SetTileDataProperties(static_cast<doc::Tileset*>(obj),
+                                        propObj->ti,
+                                        extID,
+                                        std::move(newProperties)));
     }
     else {
-      auto& properties = obj->userData().properties(extID);
-      properties = std::move(newProperties);
+      tx(new cmd::SetUserDataProperties(obj, extID, std::move(newProperties)));
     }
+    tx.commit();
+  }
+  // Copy the newProperties into properties(extID)
+  else {
+    Properties propObjExt(*propObj, extID);
+    auto& properties = propObjExt.properties(L);
+    properties = std::move(newProperties);
   }
 
   push_new<Properties>(L, *propObj, extID);
@@ -221,17 +232,17 @@ int PropertiesIterator_gc(lua_State* L)
 }
 
 const luaL_Reg Properties_methods[] = {
-  { "__len", Properties_len },
-  { "__call", Properties_call },
-  { "__index", Properties_index },
+  { "__len",      Properties_len      },
+  { "__call",     Properties_call     },
+  { "__index",    Properties_index    },
   { "__newindex", Properties_newindex },
-  { "__pairs", Properties_pairs },
-  { nullptr, nullptr }
+  { "__pairs",    Properties_pairs    },
+  { nullptr,      nullptr             }
 };
 
 const luaL_Reg PropertiesIterator_methods[] = {
-  { "__gc", PropertiesIterator_gc },
-  { nullptr, nullptr }
+  { "__gc",  PropertiesIterator_gc },
+  { nullptr, nullptr               }
 };
 
 } // anonymous namespace
@@ -245,9 +256,7 @@ void register_properties_class(lua_State* L)
   REG_CLASS(L, PropertiesIterator);
 }
 
-void push_properties(lua_State* L,
-                     doc::WithUserData* wud,
-                     const std::string& extID)
+void push_properties(lua_State* L, doc::WithUserData* wud, const std::string& extID)
 {
   push_new<Properties>(L, wud, extID);
 }
@@ -260,5 +269,13 @@ void push_tile_properties(lua_State* L,
   push_new<Properties>(L, ts, ti, extID);
 }
 
-} // namespace script
-} // namespace app
+doc::UserData::Properties* may_get_properties(lua_State* L, int index)
+{
+  auto propObj = may_get_obj<Properties>(L, index);
+  if (!propObj)
+    return nullptr;
+
+  return &propObj->properties(L);
+}
+
+}} // namespace app::script

@@ -1,12 +1,12 @@
 // Aseprite Document Library
-// Copyright (C) 2019-2022  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2016  David Capello
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "doc/object.h"
@@ -23,16 +23,14 @@ static ObjectId newId = 0;
 // TODO Profile this and see if an unordered_map is better
 static std::map<ObjectId, Object*> objects;
 
-Object::Object(ObjectType type)
-  : m_type(type)
-  , m_id(0)
-  , m_version(0)
+Object::Object(ObjectType type) : m_type(type)
 {
 }
 
 Object::Object(const Object& other)
   : m_type(other.m_type)
-  , m_id(0) // We don't copy the ID
+  , m_id(NullId) // We don't copy the ID
+  , m_suspendedId(NullId)
   , m_version(0) // We don't copy the version
 {
 }
@@ -40,7 +38,7 @@ Object::Object(const Object& other)
 Object::~Object()
 {
   if (m_id)
-    setId(0);
+    setId(NullId);
 }
 
 int Object::getMemSize() const
@@ -50,6 +48,9 @@ int Object::getMemSize() const
 
 const ObjectId Object::id() const
 {
+  // We cannot ask for the ID from a "suspended" object.
+  ASSERT(m_suspendedId == NullId);
+
   // The first time the ID is request, we store the object in the
   // "objects" hash table.
   if (!m_id) {
@@ -79,13 +80,16 @@ void Object::setId(ObjectId id)
     if (objects.find(m_id) != objects.end()) {
       Object* obj = objects.find(m_id)->second;
       if (obj) {
-        TRACEARGS("ASSERT FAILED: Object with id", m_id,
-                  "of kind", int(obj->type()),
-                  "version", obj->version(), "should not exist");
+        TRACEARGS("ASSERT FAILED: Object with id",
+                  m_id,
+                  "of kind",
+                  int(obj->type()),
+                  "version",
+                  obj->version(),
+                  "should not exist");
       }
       else {
-        TRACEARGS("ASSERT FAILED: Object with id", m_id,
-                  "registered as nullptr should not exist");
+        TRACEARGS("ASSERT FAILED: Object with id", m_id, "registered as nullptr should not exist");
       }
     }
     ASSERT(objects.find(m_id) == objects.end());
@@ -97,6 +101,20 @@ void Object::setId(ObjectId id)
 void Object::setVersion(ObjectVersion version)
 {
   m_version = version;
+}
+
+void Object::suspendObject()
+{
+  ASSERT(m_suspendedId == NullId);
+  m_suspendedId = m_id;
+  setId(NullId);
+}
+
+void Object::restoreObject()
+{
+  ASSERT(m_id == NullId);
+  setId(m_suspendedId);
+  m_suspendedId = NullId;
 }
 
 Object* get_object(ObjectId id)

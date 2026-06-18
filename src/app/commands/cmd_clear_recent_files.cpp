@@ -5,7 +5,7 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -23,17 +23,14 @@ protected:
   void onExecute(Context* ctx) override;
 };
 
-ClearRecentFilesCommand::ClearRecentFilesCommand()
-  : Command(CommandId::ClearRecentFiles(), CmdUIOnlyFlag)
+ClearRecentFilesCommand::ClearRecentFilesCommand() : Command(CommandId::ClearRecentFiles())
 {
 }
 
 bool ClearRecentFilesCommand::onEnabled(Context* ctx)
 {
   auto recent = App::instance()->recentFiles();
-  return (recent &&
-          (!recent->recentFiles().empty() ||
-           !recent->recentFolders().empty()));
+  return (recent && (!recent->recentFiles().empty() || !recent->recentFolders().empty()));
 }
 
 void ClearRecentFilesCommand::onExecute(Context* ctx)

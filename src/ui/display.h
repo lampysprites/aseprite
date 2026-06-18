@@ -1,5 +1,5 @@
 // Aseprite UI Library
-// Copyright (C) 2019-2023  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
@@ -12,85 +12,82 @@
 #include "gfx/region.h"
 #include "gfx/size.h"
 #include "os/window.h"
+#include "ui/layer.h"
 
 #include <vector>
 
 namespace ui {
-  class Widget;
-  class Window;
+class Widget;
+class Window;
 
-  // Wraps a native window (os::Window). On each "display" we can show
-  // the main manager or a window (containedWidget), and a set of
-  // children window that doesn't have a native window counterpart
-  // (tooltips?)
-  class Display {
-  public:
-    Display(Display* parentDisplay,
-            const os::WindowRef& nativeWindow,
-            Widget* containedWidget);
+// Wraps a native window (os::Window). On each "display" we can show
+// the main manager or a window (containedWidget), and a set of
+// children window that doesn't have a native window counterpart
+// (tooltips?)
+class Display {
+public:
+  Display(Display* parentDisplay, const os::WindowRef& nativeWindow, Widget* containedWidget);
 
-    Display* parentDisplay() { return m_parentDisplay; }
-    os::Window* nativeWindow() const { return m_nativeWindow.get(); }
-    os::Surface* surface() const;
+  Display* parentDisplay() { return m_parentDisplay; }
+  os::Window* nativeWindow() const { return m_nativeWindow.get(); }
+  os::SurfaceRef nativeSurface() const;
+  os::ColorSpaceRef colorSpace() const { return m_nativeWindow->colorSpace(); }
 
-    int scale() const { return m_nativeWindow->scale(); }
-    gfx::Size size() const;
-    gfx::Rect bounds() const { return gfx::Rect(size()); }
+  UILayers layers() { return m_layers; }
+  UILayerRef backLayer() { return m_layers.front(); }
+  void addLayer(const UILayerRef& layer);
+  void removeLayer(const UILayerRef& layer);
+  void configureBackLayer();
 
-    Widget* containedWidget() const { return m_containedWidget; }
+  int scale() const { return m_nativeWindow->scale(); }
+  gfx::Size size() const;
+  gfx::Rect bounds() const { return gfx::Rect(size()); }
 
-    // Mark the given rectangle as a area to be flipped to the real
-    // screen.
-    void dirtyRect(const gfx::Rect& bounds);
+  Widget* containedWidget() const { return m_containedWidget; }
 
-    // Refreshes the real display with the UI content.
-    void flipDisplay();
+  // Mark the given rectangle as a area to be flipped to the real
+  // screen.
+  void dirtyRect(const gfx::Rect& bounds);
 
-    // Returns the invalid region in the screen to being updated with
-    // PaintMessages. This region is cleared when each widget receives
-    // a paint message.
-    const gfx::Region& getInvalidRegion() const {
-      return m_invalidRegion;
-    }
+  // Refreshes the real display with the UI content.
+  void flipDisplay();
 
-    void addInvalidRegion(const gfx::Region& b) {
-      m_invalidRegion |= b;
-    }
+  // Returns the invalid region in the screen to being updated with
+  // PaintMessages. This region is cleared when each widget receives
+  // a paint message.
+  const gfx::Region& getInvalidRegion() const { return m_invalidRegion; }
 
-    void subtractInvalidRegion(const gfx::Region& b) {
-      m_invalidRegion -= b;
-    }
+  void addInvalidRegion(const gfx::Region& b) { m_invalidRegion |= b; }
 
-    void setInvalidRegion(const gfx::Region& b) {
-      m_invalidRegion = b;
-    }
+  void subtractInvalidRegion(const gfx::Region& b) { m_invalidRegion -= b; }
 
-    void invalidateRect(const gfx::Rect& rect);
-    void invalidateRegion(const gfx::Region& region);
+  void setInvalidRegion(const gfx::Region& b) { m_invalidRegion = b; }
 
-    void addWindow(Window* window);
-    void removeWindow(Window* window);
-    void handleWindowZOrder(Window* window);
-    const std::vector<Window*>& getWindows() const { return m_windows; }
+  void invalidateRect(const gfx::Rect& rect);
+  void invalidateRegion(const gfx::Region& region);
 
-    gfx::Size workareaSizeUIScale();
+  void addWindow(Window* window);
+  void removeWindow(Window* window);
+  void handleWindowZOrder(Window* window);
+  const std::vector<Window*>& getWindows() const { return m_windows; }
 
-    const gfx::Point& lastMousePos() const { return m_lastMousePos; }
-    void updateLastMousePos(const gfx::Point& pos) { m_lastMousePos = pos; }
+  gfx::Size workareaSizeUIScale();
 
-    void _setParentDisplay(Display* parentDisplay) {
-      m_parentDisplay = parentDisplay;
-    }
+  const gfx::Point& lastMousePos() const { return m_lastMousePos; }
+  void updateLastMousePos(const gfx::Point& pos) { m_lastMousePos = pos; }
 
-  private:
-    Display* m_parentDisplay;
-    os::WindowRef m_nativeWindow;
-    Widget* m_containedWidget;      // A ui::Manager or a ui::Window
-    std::vector<Window*> m_windows; // Sub-windows in this display
-    gfx::Region m_invalidRegion;    // Invalid region (we didn't receive paint messages yet for this).
-    gfx::Region m_dirtyRegion;      // Region to flip to the os::Display
-    gfx::Point m_lastMousePos;
-  };
+  void _setParentDisplay(Display* parentDisplay) { m_parentDisplay = parentDisplay; }
+
+private:
+  Display* m_parentDisplay;
+  os::WindowRef m_nativeWindow;
+  Widget* m_containedWidget;      // A ui::Manager or a ui::Window
+  std::vector<Window*> m_windows; // Sub-windows in this display
+  UILayers m_layers;              // Layers to paint the surface
+  gfx::Region m_invalidRegion;    // Invalid region (we didn't receive paint messages yet for this).
+  gfx::Region m_dirtyRegion;      // Region to flip to the os::Display
+  gfx::Point m_lastMousePos;
+};
 
 } // namespace ui
 

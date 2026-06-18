@@ -7,21 +7,71 @@ dofile('./test_utils.lua')
 
 -- Test app.events
 do
-  local i = 0
+  local bc = 0
+  local c = 0
+  local beforeListener = app.events:on('beforesitechange',
+                                 function() bc = bc + 1 end)
   local listener = app.events:on('sitechange',
-                                 function() i = i + 1 end)
-  assert(i == 0)
+                                 function() c = c + 1 end)
+
+  expect_eq(0, bc)
+  expect_eq(0, c)
+  expect_eq(nil, app.activeSprite)
+
   local a = Sprite(32, 32)
   expect_eq(a, app.activeSprite)
-  expect_eq(1, i)
+  expect_eq(1, bc)
+  expect_eq(1, c)
+
   local b = Sprite(32, 32)
   expect_eq(b, app.activeSprite)
-  expect_eq(2, i)
+  expect_eq(2, bc)
+  expect_eq(2, c)
+
   app.activeSprite = a
-  expect_eq(3, i)
+  expect_eq(3, bc)
+  expect_eq(3, c)
+
   app.events:off(listener)
+  app.events:off(beforeListener)
+
   app.activeSprite = b
-  expect_eq(3, i)
+  expect_eq(3, bc)
+  expect_eq(3, c)
+end
+
+-- Alternate version of the events test to ensure proper observer disconnection
+do
+  local bc = 0
+  local c = 0
+  local beforeListener = app.events:on('beforesitechange',
+                                 function() bc = bc + 1 end)
+  local listener = app.events:on('sitechange',
+                                 function() c = c + 1 end)
+
+  assert(bc == 0)
+  assert(c == 0)
+  local a = Sprite(32, 32)
+  expect_eq(a, app.activeSprite)
+  expect_eq(1, bc)
+  expect_eq(1, c)
+
+  app.events:off(beforeListener)
+
+  local b = Sprite(32, 32)
+  expect_eq(b, app.activeSprite)
+  expect_eq(1, bc)
+  expect_eq(2, c)
+
+  app.activeSprite = a
+  expect_eq(1, bc)
+  expect_eq(3, c)
+
+  app.events:off(listener)
+
+  app.activeSprite = b
+  expect_eq(1, bc)
+  expect_eq(3, c)
 end
 
 do
@@ -133,4 +183,80 @@ do
   -- onSiteChange() function.
   s:close()
   app.events:off(onSiteChange)
+end
+
+-- Test Layer events
+-- BlendMode
+do
+  local sprite = Sprite(32, 32)
+  local eventCount = 0
+  function onBlendMode() eventCount = eventCount + 1 end
+
+  sprite.events:on('layerblendmode', onBlendMode)
+  sprite.layers[1].blendMode = BlendMode.MULTIPLY
+  expect_eq(1, eventCount)
+  sprite.layers[1].blendMode = BlendMode.SUBTRACT
+  expect_eq(2, eventCount)
+
+  sprite.events:off(onBlendMode)
+
+  sprite.layers[1].blendMode = BlendMode.DIVIDE
+  expect_eq(2, eventCount)
+end
+
+-- Name
+do
+  local sprite = Sprite(32, 32)
+  local eventCount = 0
+  function onLayerName() eventCount = eventCount + 1 end
+
+  sprite.events:on('layername', onLayerName)
+  sprite.layers[1].name = "Name 1"
+  expect_eq(1, eventCount)
+  sprite.layers[1].name = "Name 2"
+  expect_eq(2, eventCount)
+
+  sprite.events:off(onLayerName)
+
+  sprite.layers[1].name = "Name 3"
+  expect_eq(2, eventCount)
+end
+
+-- Opacity
+do
+  local sprite = Sprite(32, 32)
+  local eventCount = 0
+  function onLayerOpacity() eventCount = eventCount + 1 end
+
+  sprite.events:on('layeropacity', onLayerOpacity)
+  sprite.layers[1].opacity = 55
+  expect_eq(1, eventCount)
+  sprite.layers[1].opacity = 200
+  expect_eq(2, eventCount)
+
+  sprite.events:off(onLayerOpacity)
+
+  sprite.layers[1].opacity = 0
+  expect_eq(2, eventCount)
+end
+
+-- Visibility
+do
+  local sprite = Sprite(32, 32)
+  local eventCount = 0
+  function onLayerVisibility() eventCount = eventCount + 1 end
+
+  sprite.events:on('layervisibility', onLayerVisibility)
+  sprite.layers[1].isVisible = false
+  expect_eq(1, eventCount)
+  sprite.layers[1].isVisible = true
+  expect_eq(2, eventCount)
+  -- Events can trigger even when the value doesn't technically change:
+  sprite.layers[1].isVisible = true
+  expect_eq(3, eventCount)
+
+  sprite.events:off(onLayerVisibility)
+
+  sprite.layers[1].isVisible = false
+  expect_eq(3, eventCount)
 end

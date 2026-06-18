@@ -1,4 +1,5 @@
 // Aseprite
+// Copyright (C) 2025  Igara Studio S.A.
 // Copyright (C) 2016  David Capello
 //
 // This program is distributed under the terms of
@@ -11,26 +12,26 @@
 #include <vector>
 
 namespace doc {
-  class Layer;
-  class LayerGroup;
-  class SelectedLayers;
-  class Sprite;
-}
+class Layer;
+class LayerGroup;
+class SelectedLayers;
+class Sprite;
+} // namespace doc
 
 namespace app {
 
-  class RestoreVisibleLayers {
-  public:
-    ~RestoreVisibleLayers();
+class RestoreVisibleLayers {
+public:
+  ~RestoreVisibleLayers();
 
-    void showLayer(doc::Layer* layer);
-    void showSelectedLayers(doc::Sprite* sprite, const doc::SelectedLayers& selLayers);
+  void showLayer(doc::Layer* layer);
+  void showSelectedLayers(doc::Sprite* sprite, const doc::SelectedLayers& selLayers);
 
-  private:
-    void setLayerVisiblity(doc::LayerGroup* group, const doc::SelectedLayers& selLayers);
+private:
+  void setLayerVisiblity(doc::Layer* group, const doc::SelectedLayers& selLayers);
 
-    std::vector<std::pair<doc::Layer*, bool> > m_restore;
-  };
+  std::vector<std::pair<doc::Layer*, bool>> m_restore;
+};
 
 } // namespace app
 

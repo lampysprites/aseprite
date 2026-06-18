@@ -1,12 +1,12 @@
 // Aseprite UI Library
-// Copyright (C) 2019-2023  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2016  David Capello
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "ui/textbox.h"
@@ -15,6 +15,7 @@
 #include "ui/display.h"
 #include "ui/intern.h"
 #include "ui/message.h"
+#include "ui/scale.h"
 #include "ui/size_hint_event.h"
 #include "ui/system.h"
 #include "ui/theme.h"
@@ -24,8 +25,7 @@
 
 namespace ui {
 
-TextBox::TextBox(const std::string& text, int align)
- : Widget(kTextBoxWidget)
+TextBox::TextBox(const std::string& text, int align) : Widget(kTextBoxWidget)
 {
   setBgColor(gfx::ColorNone);
   setFocusStop(true);
@@ -37,7 +37,6 @@ TextBox::TextBox(const std::string& text, int align)
 bool TextBox::onProcessMessage(Message* msg)
 {
   switch (msg->type()) {
-
     case kKeyDownMessage:
       if (hasFocus()) {
         View* view = View::getView(this);
@@ -47,34 +46,33 @@ bool TextBox::onProcessMessage(Message* msg)
           int textheight = textHeight();
 
           switch (static_cast<KeyMessage*>(msg)->scancode()) {
-
             case kKeyLeft:
-              scroll.x -= vp.w/2;
+              scroll.x -= vp.w / 2;
               view->setViewScroll(scroll);
               break;
 
             case kKeyRight:
-              scroll.x += vp.w/2;
+              scroll.x += vp.w / 2;
               view->setViewScroll(scroll);
               break;
 
             case kKeyUp:
-              scroll.y -= vp.h/2;
+              scroll.y -= vp.h / 2;
               view->setViewScroll(scroll);
               break;
 
             case kKeyDown:
-              scroll.y += vp.h/2;
+              scroll.y += vp.h / 2;
               view->setViewScroll(scroll);
               break;
 
             case kKeyPageUp:
-              scroll.y -= (vp.h-textheight);
+              scroll.y -= (vp.h - textheight);
               view->setViewScroll(scroll);
               break;
 
             case kKeyPageDown:
-              scroll.y += (vp.h-textheight);
+              scroll.y += (vp.h - textheight);
               view->setViewScroll(scroll);
               break;
 
@@ -88,8 +86,7 @@ bool TextBox::onProcessMessage(Message* msg)
               view->setViewScroll(scroll);
               break;
 
-            default:
-              return Widget::onProcessMessage(msg);
+            default: return Widget::onProcessMessage(msg);
           }
         }
         return true;
@@ -132,18 +129,7 @@ bool TextBox::onProcessMessage(Message* msg)
     }
 
     case kMouseWheelMessage: {
-      View* view = View::getView(this);
-      if (view) {
-        auto mouseMsg = static_cast<MouseMessage*>(msg);
-        gfx::Point scroll = view->viewScroll();
-
-        if (mouseMsg->preciseWheel())
-          scroll += mouseMsg->wheelDelta();
-        else
-          scroll += mouseMsg->wheelDelta() * textHeight()*3;
-
-        view->setViewScroll(scroll);
-      }
+      View::scrollByMessage(this, msg);
       break;
     }
   }

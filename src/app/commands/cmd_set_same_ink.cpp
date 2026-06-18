@@ -5,13 +5,12 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
 #include "app/commands/command.h"
 #include "app/commands/commands.h"
-#include "app/commands/params.h"
 #include "app/pref/preferences.h"
 #include "app/tools/tool.h"
 #include "app/tools/tool_box.h"
@@ -27,8 +26,7 @@ protected:
   void onExecute(Context* context) override;
 };
 
-SetSameInkCommand::SetSameInkCommand()
-  : Command(CommandId::SetSameInk(), CmdUIOnlyFlag)
+SetSameInkCommand::SetSameInkCommand() : Command(CommandId::SetSameInk())
 {
 }
 

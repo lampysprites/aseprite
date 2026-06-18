@@ -1,28 +1,23 @@
 // Aseprite
-// Copyright (C) 2019-2022  Igara Studio S.A.
+// Copyright (C) 2019-2023  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/cmd_transaction.h"
 
+#include "app/app.h"
 #include "app/context.h"
 #include "app/site.h"
 
-#ifdef ENABLE_UI
-#include "app/app.h"
-#include "app/ui/timeline/timeline.h"
-#endif
-
 namespace app {
 
-CmdTransaction::CmdTransaction(const std::string& label,
-                               bool changeSavedState)
+CmdTransaction::CmdTransaction(const std::string& label, bool changeSavedState)
   : m_ranges(nullptr)
   , m_label(label)
   , m_changeSavedState(changeSavedState)
@@ -31,8 +26,7 @@ CmdTransaction::CmdTransaction(const std::string& label,
 
 CmdTransaction* CmdTransaction::moveToEmptyCopy()
 {
-  CmdTransaction* copy = new CmdTransaction(m_label,
-                                            m_changeSavedState);
+  CmdTransaction* copy = new CmdTransaction(m_label, m_changeSavedState);
   copy->m_spritePositionBefore = m_spritePositionBefore;
   copy->m_spritePositionAfter = m_spritePositionAfter;
   if (m_ranges) {
@@ -43,12 +37,10 @@ CmdTransaction* CmdTransaction::moveToEmptyCopy()
   return copy;
 }
 
-void CmdTransaction::setNewDocRange(const DocRange& range)
+void CmdTransaction::setNewDocRange(const view::RealRange& range)
 {
-#ifdef ENABLE_UI
   if (m_ranges)
     range.write(m_ranges->m_after);
-#endif
 }
 
 void CmdTransaction::updateSpritePositionAfter()
@@ -87,12 +79,10 @@ void CmdTransaction::onExecute()
 {
   // Save the current site and doc range
   m_spritePositionBefore = calcSpritePosition();
-#ifdef ENABLE_UI
   if (isDocRangeEnabled()) {
     m_ranges.reset(new Ranges);
     calcDocRange().write(m_ranges->m_before);
   }
-#endif
 
   // Execute the sequence of "cmds"
   CmdSequence::onExecute();
@@ -117,43 +107,31 @@ size_t CmdTransaction::onMemSize() const
 {
   size_t size = CmdSequence::onMemSize();
   if (m_ranges) {
-    size += (m_ranges->m_before.tellp() +
-             m_ranges->m_after.tellp());
+    size += (m_ranges->m_before.tellp() + m_ranges->m_after.tellp());
   }
   return size;
 }
 
 SpritePosition CmdTransaction::calcSpritePosition() const
 {
+  // This check was added to allow executing transactions on documents that are
+  // not part of any context. For instance, when dragging and dropping a
+  // document on the timeline, the dragged document doesn't have any context (
+  // it is not associated with any editor).
+  if (!context())
+    return SpritePosition();
   Site site = context()->activeSite();
   return SpritePosition(site.layer(), site.frame());
 }
 
 bool CmdTransaction::isDocRangeEnabled() const
 {
-#ifdef ENABLE_UI
-  if (App::instance()) {
-    Timeline* timeline = App::instance()->timeline();
-    if (timeline && timeline->range().enabled())
-      return true;
-  }
-#endif
-  return false;
+  return (context() ? context()->range().enabled() : false);
 }
 
-DocRange CmdTransaction::calcDocRange() const
+view::RealRange CmdTransaction::calcDocRange() const
 {
-#ifdef ENABLE_UI
-  // TODO We cannot use Context::activeSite() because it losts
-  //      important information about the DocRange() (type and
-  //      flags).
-  if (App::instance()) {
-    Timeline* timeline = App::instance()->timeline();
-    if (timeline)
-      return timeline->range();
-  }
-#endif
-  return DocRange();
+  return (context() ? context()->range() : view::RealRange());
 }
 
 } // namespace app

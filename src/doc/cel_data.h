@@ -1,5 +1,5 @@
 // Aseprite Document Library
-// Copyright (C) 2019-2022  Igara Studio S.A.
+// Copyright (C) 2019-present  Igara Studio S.A.
 // Copyright (C) 2001-2016  David Capello
 //
 // This file is released under the terms of the MIT license.
@@ -18,86 +18,89 @@
 
 namespace doc {
 
-  class Layer;
-  class Tileset;
+class Cel;
+class Layer;
+class Tileset;
 
-  class CelData : public WithUserData {
-  public:
-    CelData(const ImageRef& image);
-    CelData(const CelData& celData);
-    ~CelData();
+class CelData : public WithUserData {
+  friend class Cel;
 
-    gfx::Point position() const { return m_bounds.origin(); }
-    const gfx::Rect& bounds() const { return m_bounds; }
-    int opacity() const { return m_opacity; }
-    Image* image() const { return const_cast<Image*>(m_image.get()); };
-    ImageRef imageRef() const { return m_image; }
+public:
+  CelData(const ImageRef& image);
+  CelData(const CelData& celData);
+  ~CelData();
 
-    // Returns a rectangle with the bounds of the image (width/height
-    // of the image) in the position of the cel (useful to compare
-    // active tilemap bounds when we have to change the tilemap cel
-    // bounds).
-    gfx::Rect imageBounds() const {
-      return gfx::Rect(m_bounds.x,
-                       m_bounds.y,
-                       m_image->width(),
-                       m_image->height());
-    }
+  gfx::Point position() const { return m_bounds.origin(); }
+  const gfx::Rect& bounds() const { return m_bounds; }
+  int opacity() const { return m_opacity; }
+  int refs() const { return m_refs; }
+  Image* image() const { return const_cast<Image*>(m_image.get()); }
+  ObjectId imageId() const { return m_image ? m_image->id() : NullId; };
+  ImageRef imageRef() const { return m_image; }
 
-    void setImage(const ImageRef& image, Layer* layer);
-    void setPosition(const gfx::Point& pos);
+  // Returns a rectangle with the bounds of the image (width/height
+  // of the image) in the position of the cel (useful to compare
+  // active tilemap bounds when we have to change the tilemap cel
+  // bounds).
+  gfx::Rect imageBounds() const
+  {
+    if (m_image)
+      return gfx::Rect(m_bounds.x, m_bounds.y, m_image->width(), m_image->height());
+    return {};
+  }
 
-    void setOpacity(int opacity) {
-      m_opacity = opacity;
-    }
+  void setImage(const ImageRef& image, Layer* layer);
+  void setPosition(const gfx::Point& pos);
 
-    void setBounds(const gfx::Rect& bounds) {
-      ASSERT(bounds.w > 0);
-      ASSERT(bounds.h > 0);
-      m_bounds = bounds;
-      if (m_boundsF)
-        *m_boundsF = gfx::RectF(bounds);
-    }
+  void setOpacity(int opacity) { m_opacity = opacity; }
 
-    void setBoundsF(const gfx::RectF& boundsF) {
-      if (m_boundsF)
-        *m_boundsF = boundsF;
-      else
-        m_boundsF = std::make_unique<gfx::RectF>(boundsF);
+  void setBounds(const gfx::Rect& bounds);
+  void setBoundsF(const gfx::RectF& boundsF);
 
-      m_bounds = gfx::Rect(boundsF);
-      if (m_bounds.w <= 0) m_bounds.w = 1;
-      if (m_bounds.h <= 0) m_bounds.h = 1;
-    }
+  const gfx::RectF& boundsF() const
+  {
+    if (!m_boundsF)
+      m_boundsF = std::make_unique<gfx::RectF>(m_bounds);
+    return *m_boundsF;
+  }
 
-    const gfx::RectF& boundsF() const {
-      if (!m_boundsF)
-        m_boundsF = std::make_unique<gfx::RectF>(m_bounds);
-      return *m_boundsF;
-    }
+  bool hasBoundsF() const { return m_boundsF != nullptr; }
 
-    bool hasBoundsF() const {
-      return m_boundsF != nullptr;
-    }
+  int getMemSize() const override
+  {
+    return sizeof(CelData) + (m_image ? m_image->getMemSize() : 0);
+  }
+  void suspendObject() override;
+  void restoreObject() override;
 
-    virtual int getMemSize() const override {
-      ASSERT(m_image);
-      return sizeof(CelData) + m_image->getMemSize();
-    }
+  void adjustBounds(Layer* layer);
 
-    void adjustBounds(Layer* layer);
+private:
+  int incRefs()
+  {
+    ASSERT(m_refs >= 0);
+    ++m_refs;
+    return m_refs;
+  }
 
-  private:
-    ImageRef m_image;
-    int m_opacity;
-    gfx::Rect m_bounds;
+  int decRefs()
+  {
+    --m_refs;
+    ASSERT(m_refs >= 0);
+    return m_refs;
+  }
 
-    // Special bounds for reference layers that can have subpixel
-    // position.
-    mutable std::unique_ptr<gfx::RectF> m_boundsF;
-  };
+  ImageRef m_image;
+  int m_opacity = 255;
+  int m_refs = 0;
+  gfx::Rect m_bounds;
 
-  typedef std::shared_ptr<CelData> CelDataRef;
+  // Special bounds for reference layers that can have subpixel
+  // position.
+  mutable std::unique_ptr<gfx::RectF> m_boundsF;
+};
+
+using CelDataRef = std::shared_ptr<CelData>;
 
 } // namespace doc
 

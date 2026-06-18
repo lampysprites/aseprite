@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019-2023  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/commands/filters/filter_preview.h"
@@ -34,7 +34,7 @@ FilterPreview::FilterPreview(FilterManagerImpl* filterMgr)
 {
   setVisible(false);
 
-  m_restartPreviewTimer.Tick.connect([this]{
+  m_restartPreviewTimer.Tick.connect([this] {
     onDelayedStartPreview();
     m_restartPreviewTimer.stop();
   });
@@ -74,6 +74,7 @@ void FilterPreview::stop()
       m_filterMgr->end();
     }
     m_timer.stop();
+    m_restartPreviewTimer.stop();
   }
 
   // Wait the filter task to end.
@@ -121,10 +122,7 @@ void FilterPreview::onDelayedStartPreview()
 bool FilterPreview::onProcessMessage(Message* msg)
 {
   switch (msg->type()) {
-
-    case kOpenMessage:
-      setEnablePreview(true);
-      break;
+    case kOpenMessage: setEnablePreview(true); break;
 
     case kCloseMessage:
       setEnablePreview(false);

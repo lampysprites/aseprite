@@ -1,16 +1,17 @@
 // Aseprite
-// Copyright (C) 2020-2024  Igara Studio S.A.
+// Copyright (C) 2020-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/ui/resources_listbox.h"
 
+#include "app/i18n/strings.h"
 #include "app/res/resource.h"
 #include "app/res/resources_loader.h"
 #include "app/ui/skin/skin_theme.h"
@@ -29,7 +30,8 @@ using namespace skin;
 // ResourceListItem
 
 ResourceListItem::ResourceListItem(Resource* resource)
-  : ListItem(resource->id()), m_resource(resource)
+  : ListItem(resource->id())
+  , m_resource(resource)
 {
 }
 
@@ -37,9 +39,7 @@ bool ResourceListItem::onProcessMessage(ui::Message* msg)
 {
   switch (msg->type()) {
     case kMouseLeaveMessage:
-    case kMouseEnterMessage:
-      invalidate();
-      break;
+    case kMouseEnterMessage: invalidate(); break;
   }
   return ListItem::onProcessMessage(msg);
 }
@@ -62,20 +62,18 @@ void ResourceListItem::onPaint(PaintEvent& ev)
 
   g->fillRect(bgcolor, bounds);
 
-  static_cast<ResourcesListBox*>(parent())->
-    paintResource(g, bounds, m_resource.get());
+  static_cast<ResourcesListBox*>(parent())->paintResource(g, bounds, m_resource.get());
 
-  g->drawText(text(), fgcolor, gfx::ColorNone,
-              gfx::Point(
-                bounds.x + 2*guiscale(),
-                bounds.y + bounds.h/2 - g->measureUIText(text()).h/2));
+  g->drawText(text(),
+              fgcolor,
+              gfx::ColorNone,
+              gfx::Point(bounds.x + 2 * guiscale(),
+                         guiscaled_center(bounds.y, bounds.h, g->font()->lineHeight())));
 }
 
 void ResourceListItem::onSizeHint(SizeHintEvent& ev)
 {
-  ev.setSizeHint(
-    static_cast<ResourcesListBox*>(parent())->
-    resourceSizeHint(m_resource.get()));
+  ev.setSizeHint(static_cast<ResourcesListBox*>(parent())->resourceSizeHint(m_resource.get()));
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -83,22 +81,12 @@ void ResourceListItem::onSizeHint(SizeHintEvent& ev)
 
 class ResourcesListBox::LoadingItem : public ListItem {
 public:
-  LoadingItem()
-    : ListItem("Loading")
-    , m_state(0) {
-  }
+  LoadingItem() : ListItem(Strings::resource_listbox_loading()), m_state(0) {}
 
-  void makeProgress() {
-    std::string text = "Loading ";
-
-    switch ((++m_state) % 4) {
-      case 0: text += "/"; break;
-      case 1: text += "-"; break;
-      case 2: text += "\\"; break;
-      case 3: text += "|"; break;
-    }
-
-    setText(text);
+  void makeProgress()
+  {
+    constexpr char progress[] = { '/', '-', '\\', '|' };
+    setText(fmt::format("{} {}", Strings::resource_listbox_loading(), progress[((++m_state) % 4)]));
   }
 
 private:
@@ -112,7 +100,7 @@ ResourcesListBox::ResourcesListBox(ResourcesLoader* resourcesLoader)
   : m_resourcesLoader(resourcesLoader)
   , m_resourcesTimer(100)
 {
-  m_resourcesTimer.Tick.connect([this]{ onTick(); });
+  m_resourcesTimer.Tick.connect([this] { onTick(); });
 }
 
 Resource* ResourcesListBox::selectedResource()
@@ -168,7 +156,6 @@ gfx::Size ResourcesListBox::resourceSizeHint(Resource* resource)
 bool ResourcesListBox::onProcessMessage(ui::Message* msg)
 {
   switch (msg->type()) {
-
     case kOpenMessage: {
       if (m_reloadOnOpen) {
         m_reloadOnOpen = false;
@@ -181,7 +168,6 @@ bool ResourcesListBox::onProcessMessage(ui::Message* msg)
       }
       break;
     }
-
   }
   return ListBox::onProcessMessage(msg);
 }
@@ -208,26 +194,26 @@ void ResourcesListBox::onTick()
   if (!m_loadingItem) {
     m_loadingItem = new LoadingItem;
     addChild(m_loadingItem);
+    layout();
   }
   m_loadingItem->makeProgress();
 
   std::unique_ptr<Resource> resource;
-  std::string name;
 
   while (m_resourcesLoader->next(resource)) {
     std::unique_ptr<ResourceListItem> listItem(onCreateResourceItem(resource.get()));
-    insertChild(getItemsCount()-1, listItem.get());
-    sortItems();
-    layout();
-
-    if (View* view = View::getView(this))
-      view->updateView();
-
+    insertChild(getItemsCount() - 1, listItem.get());
     resource.release();
     listItem.release();
   }
 
   if (m_resourcesLoader->isDone()) {
+    // Delay sorting and layout until we're fully loaded, for perfomance with big lists.
+    if (View* view = View::getView(this))
+      view->updateView();
+    sortItems();
+    layout();
+
     FinishLoading();
     stop();
   }

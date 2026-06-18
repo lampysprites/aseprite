@@ -5,7 +5,7 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -26,15 +26,14 @@ protected:
   void onExecute(Context* context) override;
 };
 
-TogglePreviewCommand::TogglePreviewCommand()
-  : Command(CommandId::TogglePreview(), CmdUIOnlyFlag)
+TogglePreviewCommand::TogglePreviewCommand() : Command(CommandId::TogglePreview())
 {
 }
 
 bool TogglePreviewCommand::onEnabled(Context* context)
 {
-  return context->checkFlags(ContextFlags::ActiveDocumentIsWritable |
-                             ContextFlags::HasActiveSprite);
+  return context->isUIAvailable() && context->checkFlags(ContextFlags::ActiveDocumentIsWritable |
+                                                         ContextFlags::HasActiveSprite);
 }
 
 bool TogglePreviewCommand::onChecked(Context* context)
@@ -49,8 +48,7 @@ bool TogglePreviewCommand::onChecked(Context* context)
 
 void TogglePreviewCommand::onExecute(Context* context)
 {
-  PreviewEditorWindow* previewWin =
-    App::instance()->mainWindow()->getPreviewEditor();
+  PreviewEditorWindow* previewWin = App::instance()->mainWindow()->getPreviewEditor();
 
   bool state = previewWin->isPreviewEnabled();
   previewWin->setPreviewEnabled(!state);

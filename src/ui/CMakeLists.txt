@@ -1,5 +1,5 @@
 # Aseprite UI Library
-# Copyright (C) 2019-2022  Igara Studio S.A.
+# Copyright (C) 2019-2025  Igara Studio S.A.
 # Copyright (C) 2001-2018  David Capello
 
 if(WIN32)
@@ -7,7 +7,6 @@ if(WIN32)
 endif()
 
 add_library(ui-lib
-  accelerator.cpp
   alert.cpp
   app_state.cpp
   box.cpp
@@ -25,6 +24,7 @@ add_library(ui-lib
   int_entry.cpp
   intern.cpp
   label.cpp
+  layer.cpp
   link_label.cpp
   listbox.cpp
   listitem.cpp
@@ -33,8 +33,6 @@ add_library(ui-lib
   message.cpp
   message_loop.cpp
   move_region.cpp
-  overlay.cpp
-  overlay_manager.cpp
   paint.cpp
   paint_event.cpp
   panel.cpp
@@ -44,13 +42,17 @@ add_library(ui-lib
   resize_event.cpp
   scroll_bar.cpp
   scroll_helper.cpp
+  scroll_window.cpp
   separator.cpp
+  shortcut.cpp
   size_hint_event.cpp
   slider.cpp
   splitter.cpp
   style.cpp
   system.cpp
   textbox.cpp
+  textcmd.cpp
+  textedit.cpp
   theme.cpp
   timer.cpp
   tooltips.cpp
@@ -61,6 +63,8 @@ add_library(ui-lib
 
 target_link_libraries(ui-lib
   laf-os
+  laf-text
   laf-gfx
   laf-base
-  obs)
+  obs
+  fmt)

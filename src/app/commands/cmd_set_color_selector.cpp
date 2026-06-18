@@ -1,19 +1,20 @@
 // Aseprite
+// Copyright (C) 2024  Igara Studio S.A.
 // Copyright (C) 2016-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
 #include "app/commands/command.h"
 #include "app/commands/params.h"
+#include "app/context.h"
 #include "app/i18n/strings.h"
 #include "app/ui/color_bar.h"
-#include "fmt/format.h"
 
 namespace app {
 
@@ -22,6 +23,7 @@ public:
   SetColorSelectorCommand();
 
 protected:
+  bool onEnabled(Context* context) override;
   bool onNeedsParams() const override { return true; }
   void onLoadParams(const Params& params) override;
   bool onChecked(Context* context) override;
@@ -33,9 +35,14 @@ private:
 };
 
 SetColorSelectorCommand::SetColorSelectorCommand()
-  : Command(CommandId::SetColorSelector(), CmdUIOnlyFlag)
+  : Command(CommandId::SetColorSelector())
   , m_type(ColorBar::ColorSelector::SPECTRUM)
 {
+}
+
+bool SetColorSelectorCommand::onEnabled(Context* context)
+{
+  return context->isUIAvailable();
 }
 
 void SetColorSelectorCommand::onLoadParams(const Params& params)
@@ -48,8 +55,7 @@ void SetColorSelectorCommand::onLoadParams(const Params& params)
   else if (type == "tint-shade-tone") {
     m_type = ColorBar::ColorSelector::TINT_SHADE_TONE;
   }
-  else if (type == "wheel" ||
-           type == "rgb-wheel") {
+  else if (type == "wheel" || type == "rgb-wheel") {
     m_type = ColorBar::ColorSelector::RGB_WHEEL;
   }
   else if (type == "ryb-wheel") {
@@ -90,7 +96,7 @@ std::string SetColorSelectorCommand::onGetFriendlyName() const
       type = Strings::commands_SetColorSelector_NormalMapWheel();
       break;
   }
-  return fmt::format(getBaseFriendlyName() + ": {0}", type);
+  return fmt::format("{0}: {1}", Command::onGetFriendlyName(), type);
 }
 
 Command* CommandFactory::createSetColorSelectorCommand()

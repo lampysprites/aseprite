@@ -1,5 +1,5 @@
 // Aseprite
-// Copyright (C) 2019-2024  Igara Studio S.A.
+// Copyright (C) 2019-present  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
@@ -19,107 +19,116 @@
 #include <memory>
 
 namespace doc {
-  class Image;
-  class Mask;
-  class Palette;
-  class PalettePicks;
-  class Tileset;
+class Image;
+class Mask;
+class Palette;
+class PalettePicks;
+class Slice;
+class Tileset;
+} // namespace doc
+
+namespace view {
+class Range;
 }
 
 namespace app {
-  class Context;
-  class ContextReader;
-  class ContextWriter;
-  class Doc;
-  class DocRange;
-  class Site;
-  class Tx;
+class Context;
+class ContextReader;
+class ContextWriter;
+class Doc;
+class Site;
+class Tx;
 
-  enum class ClipboardFormat {
-    None,
-    Image,
-    DocRange,
-    PaletteEntries,
-    Tilemap,
-    Tileset,
+enum class ClipboardFormat {
+  None,
+  Image,
+  DocRange,
+  PaletteEntries,
+  Tilemap,
+  Tileset,
+  Slices,
+};
+
+class Clipboard : public ui::ClipboardDelegate {
+public:
+  struct NativeData {
+    std::unique_ptr<doc::Image> image;
+    std::unique_ptr<doc::Mask> mask;
+    std::unique_ptr<doc::Palette> palette;
+    std::unique_ptr<doc::Tileset> tileset;
   };
 
-  class Clipboard : public ui::ClipboardDelegate {
-  public:
-    static Clipboard* instance();
+  static Clipboard* instance();
 
-    Clipboard();
-    ~Clipboard();
+  Clipboard();
+  ~Clipboard();
 
-    ClipboardFormat format() const;
-    void getDocumentRangeInfo(Doc** document, DocRange* range);
+  ClipboardFormat format() const;
+  void getDocumentRangeInfo(Doc** document, view::Range* range);
 
-    void clearMaskFromCels(Tx& tx,
-                           Doc* doc,
-                           const Site& site,
-                           const doc::CelList& cels,
-                           const bool deselectMask);
+  void clearMaskFromCels(Tx& tx,
+                         Doc* doc,
+                         const Site& site,
+                         const doc::CelList& cels,
+                         const bool deselectMask);
 
-    void clearContent();
-    void cut(ContextWriter& context);
-    void copy(const ContextReader& context);
-    void copyMerged(const ContextReader& context);
-    void copyRange(const ContextReader& context, const DocRange& range);
-    void copyImage(const doc::Image* image,
+  void clearContent();
+  void cut(ContextWriter& context);
+  void copy(const ContextReader& context);
+  void copyMerged(const ContextReader& context);
+  void copyRange(const ContextReader& context, const view::Range& range);
+  void copyImage(const doc::Image* image, const doc::Mask* mask, const doc::Palette* palette);
+  void copyTilemap(const doc::Image* image,
                    const doc::Mask* mask,
-                   const doc::Palette* palette);
-    void copyTilemap(const doc::Image* image,
-                     const doc::Mask* mask,
-                     const doc::Palette* pal,
-                     const doc::Tileset* tileset);
-    void copyPalette(const doc::Palette* palette,
-                     const doc::PalettePicks& picks);
-    void paste(Context* ctx,
-               const bool interactive);
+                   const doc::Palette* pal,
+                   const doc::Tileset* tileset);
+  void copyPalette(const doc::Palette* palette, const doc::PalettePicks& picks);
+  void copySlices(const std::vector<doc::Slice*> slices);
+  void paste(Context* ctx, const bool interactive, const gfx::Point* position = nullptr);
 
-    doc::ImageRef getImage(doc::Palette* palette);
+  doc::ImageRef getImage(doc::Palette* palette);
 
-    // Returns true and fills the specified "size"" with the image's
-    // size in the clipboard, or return false in case that the clipboard
-    // doesn't contain an image at all.
-    bool getImageSize(gfx::Size& size);
+  // Returns true and fills the specified "size"" with the image's
+  // size in the clipboard, or return false in case that the clipboard
+  // doesn't contain an image at all.
+  bool getImageSize(gfx::Size& size);
 
-    doc::Palette* getPalette();
-    const doc::PalettePicks& getPalettePicks();
+  doc::Palette* getPalette();
+  const doc::PalettePicks& getPalettePicks();
 
-    // ui::ClipboardDelegate impl
-    void setClipboardText(const std::string& text) override;
-    bool getClipboardText(std::string& text) override;
+  // ui::ClipboardDelegate impl
+  void setClipboardText(const std::string& text) override;
+  bool getClipboardText(std::string& text) override;
+  bool hasClipboardText() override;
 
-  private:
-    void setData(doc::Image* image,
-                 doc::Mask* mask,
-                 doc::Palette* palette,
-                 doc::Tileset* tileset,
-                 bool set_native_clipboard,
-                 bool image_source_is_transparent);
-    bool copyFromDocument(const Site& site, bool merged = false);
+  bool setNativeBitmap(const doc::Image* image,
+                       const doc::Mask* mask,
+                       const doc::Palette* palette,
+                       const doc::Tileset* tileset,
+                       const doc::color_t indexMaskColor);
+  bool getNativeBitmap(NativeData& data);
 
-    // Native clipboard
-    void clearNativeContent();
-    void registerNativeFormats();
-    bool hasNativeBitmap() const;
-    bool setNativeBitmap(const doc::Image* image,
-                         const doc::Mask* mask,
-                         const doc::Palette* palette,
-                         const doc::Tileset* tileset = nullptr);
-    bool getNativeBitmap(doc::Image** image,
-                         doc::Mask** mask,
-                         doc::Palette** palette,
-                         doc::Tileset** tileset);
-    bool getNativeBitmapSize(gfx::Size* size);
+private:
+  void setData(doc::Image* image,
+               doc::Mask* mask,
+               doc::Palette* palette,
+               doc::Tileset* tileset,
+               const std::vector<doc::Slice*>* slices,
+               bool set_native_clipboard,
+               bool image_source_is_transparent);
+  bool copyFromDocument(const Site& site, bool merged = false);
 
-    bool setNativePalette(const doc::Palette* palette,
-                          const doc::PalettePicks& picks);
+  // Native clipboard
+  void clearNativeContent();
+  void registerNativeFormats();
+  bool hasNativeBitmap() const;
+  bool getNativeBitmapSize(gfx::Size* size);
 
-    struct Data;
-    std::unique_ptr<Data> m_data;
-  };
+  bool setNativePalette(const doc::Palette* palette, const doc::PalettePicks& picks);
+
+  struct Data;
+  std::unique_ptr<Data> m_data;
+};
 
 } // namespace app
 

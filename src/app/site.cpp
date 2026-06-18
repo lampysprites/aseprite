@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019-2022  Igara Studio S.A.
+// Copyright (C) 2019-2023  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/site.h"
@@ -19,6 +19,8 @@
 #include "doc/sprite.h"
 #include "doc/tileset.h"
 #include "ui/system.h"
+#include "view/cels.h"
+#include "view/range.h"
 
 namespace app {
 
@@ -26,12 +28,12 @@ using namespace doc;
 
 Palette* Site::palette()
 {
-  return (m_sprite ? m_sprite->palette(m_frame): nullptr);
+  return (m_sprite ? m_sprite->palette(m_frame) : nullptr);
 }
 
 RgbMap* Site::rgbMap() const
 {
-  return (m_sprite ? m_sprite->rgbMap(m_frame): nullptr);
+  return (m_sprite ? m_sprite->rgbMap(m_frame) : nullptr);
 }
 
 Cel* Site::cel() const
@@ -49,9 +51,12 @@ Image* Site::image(int* x, int* y, int* opacity) const
   if (m_sprite) {
     if (const Cel* cel = this->cel()) {
       image = cel->image();
-      if (x) *x = cel->x();
-      if (y) *y = cel->y();
-      if (opacity) *opacity = std::clamp(cel->opacity(), 0, 255);
+      if (x)
+        *x = cel->x();
+      if (y)
+        *y = cel->y();
+      if (opacity)
+        *opacity = std::clamp(cel->opacity(), 0, 255);
     }
   }
 
@@ -60,16 +65,16 @@ Image* Site::image(int* x, int* y, int* opacity) const
 
 Palette* Site::palette() const
 {
-  return (m_sprite ? m_sprite->palette(m_frame): nullptr);
+  return (m_sprite ? m_sprite->palette(m_frame) : nullptr);
 }
 
-void Site::range(const DocRange& range)
+void Site::range(const view::RealRange& range)
 {
   m_range = range;
   switch (range.type()) {
-    case DocRange::kCels:   m_focus = Site::InCels; break;
-    case DocRange::kFrames: m_focus = Site::InFrames; break;
-    case DocRange::kLayers: m_focus = Site::InLayers; break;
+    case view::Range::kCels:   m_focus = Site::InCels; break;
+    case view::Range::kFrames: m_focus = Site::InFrames; break;
+    case view::Range::kLayers: m_focus = Site::InLayers; break;
   }
 }
 
@@ -126,13 +131,34 @@ gfx::Rect Site::gridBounds() const
 
 bool Site::shouldTrimCel(Cel* cel) const
 {
-  return (cel &&
-          cel->layer() &&
-          cel->layer()->isTransparent() &&
+  return (cel && cel->layer() && cel->layer()->isTransparent() &&
           // Don't trim tiles in manual mode
-          !(m_tilemapMode == TilemapMode::Pixels &&
-            m_tilesetMode == TilesetMode::Manual &&
+          !(m_tilemapMode == TilemapMode::Pixels && m_tilesetMode == TilesetMode::Manual &&
             cel->layer()->isTilemap()));
+}
+
+CelList Site::selectedUniqueCels() const
+{
+  if (m_range.enabled()) {
+    return view::get_unique_cels(m_sprite, m_range);
+  }
+  else if (auto c = cel()) {
+    return CelList{ c };
+  }
+  else
+    return CelList();
+}
+
+CelList Site::selectedUniqueCelsToEditPixels() const
+{
+  if (m_range.enabled()) {
+    return view::get_unique_cels_to_edit_pixels(m_sprite, m_range);
+  }
+  else if (auto c = cel()) {
+    if (m_layer && m_layer->canEditPixels())
+      return CelList{ c };
+  }
+  return CelList();
 }
 
 } // namespace app

@@ -1,19 +1,17 @@
 // Aseprite
-// Copyright (C) 2024  Igara Studio S.A.
+// Copyright (C) 2023-2024  Igara Studio S.A.
 // Copyright (C) 2001-2017  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/commands/command.h"
 #include "app/context_access.h"
 #include "app/modules/gui.h"
-#include "app/ui/timeline/timeline.h"
-#include "doc/image.h"
 #include "doc/layer.h"
 
 namespace app {
@@ -30,26 +28,23 @@ protected:
   void onExecute(Context* context) override;
 };
 
-LayerVisibilityCommand::LayerVisibilityCommand()
-  : Command(CommandId::LayerVisibility(), CmdRecordableFlag)
+LayerVisibilityCommand::LayerVisibilityCommand() : Command(CommandId::LayerVisibility())
 {
 }
 
 bool LayerVisibilityCommand::onEnabled(Context* context)
 {
-  return context->checkFlags(ContextFlags::ActiveDocumentIsWritable |
-                             ContextFlags::HasActiveLayer);
+  return context->checkFlags(ContextFlags::ActiveDocumentIsWritable | ContextFlags::HasActiveLayer);
 }
 
 bool LayerVisibilityCommand::onChecked(Context* context)
 {
   const ContextReader reader(context);
-  if (!reader.document() ||
-      !reader.layer())
+  if (!reader.document() || !reader.layer())
     return false;
 
   SelectedLayers selLayers;
-  DocRange range = context->activeSite().range();
+  auto range = context->range();
   if (range.enabled()) {
     selLayers = range.selectedLayers();
   }
@@ -69,7 +64,7 @@ void LayerVisibilityCommand::onExecute(Context* context)
   ContextWriter writer(context);
   Doc* doc = writer.document();
   SelectedLayers selLayers;
-  DocRange range = context->activeSite().range();
+  auto range = context->range();
   if (range.enabled()) {
     selLayers = range.selectedLayers();
   }

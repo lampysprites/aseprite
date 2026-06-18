@@ -1,5 +1,5 @@
 // Aseprite UI Library
-// Copyright (C) 2018-2023  Igara Studio S.A.
+// Copyright (C) 2018-present  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This file is released under the terms of the MIT license.
@@ -9,9 +9,14 @@
 #define UI_MESSAGE_H_INCLUDED
 #pragma once
 
+// Uncomment this to debug kPaintMessages
+// #define DEBUG_PAINT_MESSAGES 1
+
+#include "base/codepoint.h"
 #include "base/paths.h"
 #include "gfx/point.h"
 #include "gfx/rect.h"
+#include "os/dnd.h"
 #include "ui/base.h"
 #include "ui/keys.h"
 #include "ui/message_type.h"
@@ -22,236 +27,329 @@
 
 namespace ui {
 
-  class Display;
-  class Timer;
-  class Widget;
+class Display;
+class Shortcut;
+class Timer;
+class Widget;
 
-  class Message {
-    enum Flags {
-      FromFilter          = 1,  // Sent from pre-filter
-      PropagateToChildren = 2,
-      PropagateToParent   = 4,
-    };
-  public:
-    Message(MessageType type,
-            KeyModifiers modifiers = kKeyUninitializedModifier);
-    virtual ~Message();
-
-    MessageType type() const { return m_type; }
-    Display* display() const { return m_display; }
-    Widget* recipient() const { return m_recipient; }
-    bool fromFilter() const { return hasFlag(FromFilter); }
-    void setFromFilter(const bool state) { setFlag(FromFilter, state); }
-    KeyModifiers modifiers() const { return m_modifiers; }
-    bool shiftPressed() const { return (m_modifiers & kKeyShiftModifier) == kKeyShiftModifier; }
-    bool ctrlPressed() const { return (m_modifiers & kKeyCtrlModifier) == kKeyCtrlModifier; }
-    bool altPressed() const { return (m_modifiers & kKeyAltModifier) == kKeyAltModifier; }
-    bool cmdPressed() const { return (m_modifiers & kKeyCmdModifier) == kKeyCmdModifier; }
-    bool winPressed() const { return (m_modifiers & kKeyWinModifier) == kKeyWinModifier; }
-    bool onlyShiftPressed() const { return m_modifiers == kKeyShiftModifier; }
-    bool onlyCtrlPressed() const { return m_modifiers == kKeyCtrlModifier; }
-    bool onlyAltPressed() const { return m_modifiers == kKeyAltModifier; }
-    bool onlyCmdPressed() const { return m_modifiers == kKeyCmdModifier; }
-    bool onlyWinPressed() const { return m_modifiers == kKeyWinModifier; }
-
-    void setDisplay(Display* display);
-    void setRecipient(Widget* widget);
-    void removeRecipient(Widget* widget);
-
-    bool propagateToChildren() const { return hasFlag(PropagateToChildren); }
-    bool propagateToParent() const { return hasFlag(PropagateToParent); }
-    void setPropagateToChildren(const bool state) { setFlag(PropagateToChildren, state); }
-    void setPropagateToParent(const bool state) { setFlag(PropagateToParent, state); }
-
-    Widget* commonAncestor() { return m_commonAncestor; }
-    void setCommonAncestor(Widget* widget) { m_commonAncestor = widget; }
-
-  private:
-    bool hasFlag(const Flags flag) const {
-      return (m_flags & flag) == flag;
-    }
-    void setFlag(const Flags flag, const bool state) {
-      m_flags = (state ? (m_flags | flag):
-                         (m_flags & ~flag));
-    }
-
-    MessageType m_type;       // Type of message
-    int m_flags;              // Special flags for this message
-    Display* m_display;
-    Widget* m_recipient;      // Recipient of this message
-    Widget* m_commonAncestor; // Common ancestor between the Leave <-> Enter messages
-    KeyModifiers m_modifiers; // Key modifiers pressed when message was created
+class Message {
+  enum Flags {
+    FromFilter = 1, // Sent from pre-filter
+    PropagateToChildren = 2,
+    PropagateToParent = 4,
   };
 
-  class CallbackMessage : public Message {
-  public:
-    CallbackMessage(std::function<void()>&& callback)
-      : Message(kCallbackMessage)
-      , m_callback(std::move(callback)) { }
-    void call() {
-      m_callback();
-    }
-  private:
-    std::function<void()> m_callback;
-  };
+public:
+  Message(MessageType type, KeyModifiers modifiers = kKeyUninitializedModifier);
+  virtual ~Message();
 
-  class KeyMessage : public Message {
-  public:
-    KeyMessage(MessageType type,
-               KeyScancode scancode,
+  MessageType type() const { return m_type; }
+  Display* display() const { return m_display; }
+  Widget* recipient() const { return m_recipient; }
+  bool fromFilter() const { return hasFlag(FromFilter); }
+  void setFromFilter(const bool state) { setFlag(FromFilter, state); }
+  KeyModifiers modifiers() const;
+  bool shiftPressed() const { return (m_modifiers & kKeyShiftModifier) == kKeyShiftModifier; }
+  bool ctrlPressed() const { return (m_modifiers & kKeyCtrlModifier) == kKeyCtrlModifier; }
+  bool altPressed() const { return (m_modifiers & kKeyAltModifier) == kKeyAltModifier; }
+  bool cmdPressed() const { return (m_modifiers & kKeyCmdModifier) == kKeyCmdModifier; }
+  bool winPressed() const { return (m_modifiers & kKeyWinModifier) == kKeyWinModifier; }
+  bool onlyShiftPressed() const { return m_modifiers == kKeyShiftModifier; }
+  bool onlyCtrlPressed() const { return m_modifiers == kKeyCtrlModifier; }
+  bool onlyAltPressed() const { return m_modifiers == kKeyAltModifier; }
+  bool onlyCmdPressed() const { return m_modifiers == kKeyCmdModifier; }
+  bool onlyWinPressed() const { return m_modifiers == kKeyWinModifier; }
+
+  void setDisplay(Display* display);
+  void setRecipient(Widget* widget);
+  void removeRecipient(Widget* widget);
+
+  bool propagateToChildren() const { return hasFlag(PropagateToChildren); }
+  bool propagateToParent() const { return hasFlag(PropagateToParent); }
+  void setPropagateToChildren(const bool state) { setFlag(PropagateToChildren, state); }
+  void setPropagateToParent(const bool state) { setFlag(PropagateToParent, state); }
+
+  Widget* commonAncestor() { return m_commonAncestor; }
+  void setCommonAncestor(Widget* widget) { m_commonAncestor = widget; }
+
+  virtual Shortcut shortcut() const;
+
+private:
+  bool hasFlag(const Flags flag) const { return (m_flags & flag) == flag; }
+  void setFlag(const Flags flag, const bool state)
+  {
+    m_flags = (state ? (m_flags | flag) : (m_flags & ~flag));
+  }
+
+  MessageType m_type; // Type of message
+  int m_flags;        // Special flags for this message
+  Display* m_display;
+  Widget* m_recipient;              // Recipient of this message
+  Widget* m_commonAncestor;         // Common ancestor between the Leave <-> Enter messages
+  mutable KeyModifiers m_modifiers; // Key modifiers pressed when message was created
+};
+
+class CallbackMessage : public Message {
+public:
+  CallbackMessage(std::function<void()>&& callback)
+    : Message(kCallbackMessage)
+    , m_callback(std::move(callback))
+  {
+  }
+  void call() { m_callback(); }
+
+private:
+  std::function<void()> m_callback;
+};
+
+class FocusMessage : public Message {
+public:
+  enum class Source {
+    Keyboard,
+    Mouse,
+    // Focused by window opening, either from being the first child, or the focus magnet
+    Window,
+    // Focused by the label buddy
+    Buddy,
+    // Any other type of focus
+    Other
+  };
+  FocusMessage(MessageType type, Widget* oldFocus, Widget* newFocus, Source source = Source::Other)
+    : Message(type)
+    , m_oldFocus(oldFocus)
+    , m_newFocus(newFocus)
+    , m_source(source)
+  {
+  }
+  Widget* oldFocus() { return m_oldFocus; }
+  Widget* newFocus() { return m_newFocus; }
+  Source source() const { return m_source; }
+
+private:
+  Widget* m_oldFocus;
+  Widget* m_newFocus;
+  Source m_source;
+};
+
+class KeyMessage : public Message {
+public:
+  KeyMessage(MessageType type,
+             KeyScancode scancode,
+             KeyModifiers modifiers,
+             base::codepoint_t unicodeChar,
+             int repeat);
+
+  KeyScancode scancode() const { return m_scancode; }
+  base::codepoint_t unicodeChar() const { return m_unicodeChar; }
+  int repeat() const { return m_repeat; }
+  bool isDeadKey() const { return m_isDead; }
+  void setDeadKey(bool state) { m_isDead = state; }
+
+  Shortcut shortcut() const override;
+
+private:
+  KeyScancode m_scancode;
+  base::codepoint_t m_unicodeChar;
+  int m_repeat; // repeat=0 means the first time the key is pressed
+  bool m_isDead;
+};
+
+class PaintMessage : public Message {
+public:
+  PaintMessage(int count, const gfx::Rect& rect)
+    : Message(kPaintMessage)
+    , m_count(count)
+    , m_rect(rect)
+  {
+  }
+
+  int count() const { return m_count; }
+  const gfx::Rect& rect() const { return m_rect; }
+
+#if DEBUG_PAINT_MESSAGES
+  // For debugging purposes only
+  bool delayed() const { return m_delayed; }
+  void delayed(const bool v) { m_delayed = v; }
+#endif
+
+private:
+  int m_count;      // Cound=0 if it's last msg of draw-chain
+  gfx::Rect m_rect; // Area to draw
+#if DEBUG_PAINT_MESSAGES
+  bool m_delayed = false; // Second PaintMessage after painting the debugging placeholder
+#endif
+};
+
+class MouseMessage : public Message {
+public:
+  MouseMessage(MessageType type,
+               PointerType pointerType,
+               MouseButton button,
                KeyModifiers modifiers,
-               int unicodeChar,
-               int repeat);
+               const gfx::Point& pos,
+               const gfx::Point& wheelDelta = gfx::Point(0, 0),
+               bool preciseWheel = false,
+               float pressure = 0.0f)
+    : Message(type, modifiers)
+    , m_pointerType(pointerType)
+    , m_button(button)
+    , m_pos(pos)
+    , m_wheelDelta(wheelDelta)
+    , m_preciseWheel(preciseWheel)
+    , m_pressure(pressure)
+  {
+  }
 
-    KeyScancode scancode() const { return m_scancode; }
-    int unicodeChar() const { return m_unicodeChar; }
-    int repeat() const { return m_repeat; }
-    bool isDeadKey() const { return m_isDead; }
-    void setDeadKey(bool state) { m_isDead = state; }
+  // Copy other MouseMessage converting its type
+  MouseMessage(MessageType type, const MouseMessage& other, const gfx::Point& newPosition)
+    : Message(type, other.modifiers())
+    , m_pointerType(other.pointerType())
+    , m_button(other.button())
+    , m_pos(newPosition)
+    , m_wheelDelta(other.wheelDelta())
+    , m_preciseWheel(other.preciseWheel())
+    , m_pressure(other.pressure())
+  {
+  }
 
-  private:
-    KeyScancode m_scancode;
-    int m_unicodeChar;
-    int m_repeat; // repeat=0 means the first time the key is pressed
-    bool m_isDead;
-  };
+  PointerType pointerType() const { return m_pointerType; }
+  MouseButton button() const { return m_button; }
+  bool left() const { return (m_button == kButtonLeft); }
+  bool right() const { return (m_button == kButtonRight); }
+  bool middle() const { return (m_button == kButtonMiddle); }
+  gfx::Point wheelDelta() const { return m_wheelDelta; }
+  bool preciseWheel() const { return m_preciseWheel; }
+  float pressure() const { return m_pressure; }
 
-  class PaintMessage : public Message {
-  public:
-    PaintMessage(int count, const gfx::Rect& rect)
-      : Message(kPaintMessage)
-      , m_count(count)
-      , m_rect(rect) {
-    }
+  const gfx::Point& position() const { return m_pos; }
 
-    int count() const { return m_count; }
-    const gfx::Rect& rect() const { return m_rect; }
+  // Returns the mouse message position relative to the given
+  // "anotherDisplay" (the m_pos field is relative to m_display).
+  gfx::Point positionForDisplay(Display* anotherDisplay) const;
 
-  private:
-    int m_count;             // Cound=0 if it's last msg of draw-chain
-    gfx::Rect m_rect;        // Area to draw
-  };
+  // Absolute position of this message on the screen.
+  gfx::Point screenPosition() const;
 
-  class MouseMessage : public Message {
-  public:
-    MouseMessage(MessageType type,
-                 PointerType pointerType,
-                 MouseButton button,
-                 KeyModifiers modifiers,
-                 const gfx::Point& pos,
-                 const gfx::Point& wheelDelta = gfx::Point(0, 0),
-                 bool preciseWheel = false,
-                 float pressure = 0.0f)
-      : Message(type, modifiers),
-        m_pointerType(pointerType),
-        m_button(button),
-        m_pos(pos),
-        m_wheelDelta(wheelDelta),
-        m_preciseWheel(preciseWheel),
-        m_pressure(pressure) {
-    }
+  Shortcut shortcut() const override;
 
-    // Copy other MouseMessage converting its type
-    MouseMessage(MessageType type,
-                 const MouseMessage& other,
-                 const gfx::Point& newPosition)
-      : Message(type, other.modifiers()),
-        m_pointerType(other.pointerType()),
-        m_button(other.button()),
-        m_pos(newPosition),
-        m_wheelDelta(other.wheelDelta()),
-        m_preciseWheel(other.preciseWheel()),
-        m_pressure(other.pressure()) {
-    }
+private:
+  PointerType m_pointerType;
+  MouseButton m_button;    // Pressed button
+  gfx::Point m_pos;        // Mouse position
+  gfx::Point m_wheelDelta; // Wheel axis variation
+  bool m_preciseWheel;
+  float m_pressure;
+};
 
-    PointerType pointerType() const { return m_pointerType; }
-    MouseButton button() const { return m_button; }
-    bool left() const { return (m_button == kButtonLeft); }
-    bool right() const { return (m_button == kButtonRight); }
-    bool middle() const { return (m_button == kButtonMiddle); }
-    gfx::Point wheelDelta() const { return m_wheelDelta; }
-    bool preciseWheel() const { return m_preciseWheel; }
-    float pressure() const { return m_pressure; }
+class TouchMessage : public Message {
+public:
+  TouchMessage(MessageType type, KeyModifiers modifiers, const gfx::Point& pos, double magnification)
+    : Message(type, modifiers)
+    , m_pos(pos)
+    , m_magnification(magnification)
+  {
+  }
 
-    const gfx::Point& position() const { return m_pos; }
+  // Copy other TouchMessage converting its type
+  TouchMessage(MessageType type, const TouchMessage& other, const gfx::Point& newPosition)
+    : Message(type, other.modifiers())
+    , m_pos(newPosition)
+    , m_magnification(other.magnification())
+  {
+  }
 
-    // Returns the mouse message position relative to the given
-    // "anotherDisplay" (the m_pos field is relative to m_display).
-    gfx::Point positionForDisplay(Display* anotherDisplay) const;
+  const gfx::Point& position() const { return m_pos; }
+  double magnification() const { return m_magnification; }
 
-    // Absolute position of this message on the screen.
-    gfx::Point screenPosition() const;
+private:
+  gfx::Point m_pos; // Mouse position
+  double m_magnification;
+};
 
-  private:
-    PointerType m_pointerType;
-    MouseButton m_button;       // Pressed button
-    gfx::Point m_pos;           // Mouse position
-    gfx::Point m_wheelDelta;    // Wheel axis variation
-    bool m_preciseWheel;
-    float m_pressure;
-  };
+class TimerMessage : public Message {
+public:
+  TimerMessage(int count, Timer* timer) : Message(kTimerMessage), m_count(count), m_timer(timer) {}
 
-  class TouchMessage : public Message {
-  public:
-    TouchMessage(MessageType type,
-                 KeyModifiers modifiers,
-                 const gfx::Point& pos,
-                 double magnification)
-      : Message(type, modifiers),
-        m_pos(pos),
-        m_magnification(magnification) {
-    }
+  int count() const { return m_count; }
+  Timer* timer() { return m_timer; }
 
-    // Copy other TouchMessage converting its type
-    TouchMessage(MessageType type,
-                 const TouchMessage& other,
-                 const gfx::Point& newPosition)
-      : Message(type, other.modifiers()),
-        m_pos(newPosition),
-        m_magnification(other.magnification()) {
-    }
+  // Used by Manager::removeMessagesForTimer() to invalidate the
+  // message. It's like removing the message from the queue, but
+  // without touching the queue in case that we're iterating it
+  // (which can happen if we remove the timer from a kTimerMessage
+  // handler).
+  void _resetTimer() { m_timer = nullptr; }
 
-    const gfx::Point& position() const { return m_pos; }
-    double magnification() const { return m_magnification; }
+private:
+  int m_count;    // Accumulated calls
+  Timer* m_timer; // Timer handle
+};
 
-  private:
-    gfx::Point m_pos;           // Mouse position
-    double m_magnification;
-  };
+class DropFilesMessage : public Message {
+public:
+  DropFilesMessage(const base::paths& files) : Message(kDropFilesMessage), m_files(files) {}
 
-  class TimerMessage : public Message {
-  public:
-    TimerMessage(int count, Timer* timer)
-      : Message(kTimerMessage), m_count(count), m_timer(timer) {
-    }
+  const base::paths& files() const { return m_files; }
 
-    int count() const { return m_count; }
-    Timer* timer() { return m_timer; }
+private:
+  base::paths m_files;
+};
 
-    // Used by Manager::removeMessagesForTimer() to invalidate the
-    // message. It's like removing the message from the queue, but
-    // without touching the queue in case that we're iterating it
-    // (which can happen if we remove the timer from a kTimerMessage
-    // handler).
-    void _resetTimer() { m_timer = nullptr; }
+class DndMessage : public Message {
+public:
+  os::DragEvent& event() { return m_event; }
 
-  private:
-    int m_count;                    // Accumulated calls
-    Timer* m_timer;                 // Timer handle
-  };
+protected:
+  DndMessage(MessageType type, os::DragEvent& ev) : Message(type), m_event(ev) {}
+  DndMessage(const DndMessage&) = default;
+  DndMessage(DndMessage&&) = default;
 
-  class DropFilesMessage : public Message {
-  public:
-    DropFilesMessage(const base::paths& files)
-      : Message(kDropFilesMessage)
-      , m_files(files) {
-    }
+private:
+  os::DragEvent& m_event;
+};
 
-    const base::paths& files() const { return m_files; }
+class DragEnterMessage : public DndMessage {
+public:
+  DragEnterMessage(os::DragEvent& ev) : DndMessage(kDragEnterMessage, ev) {}
 
-  private:
-    base::paths m_files;
-  };
+  // Returns the Widget under the mouse cursor when the user is dragging elements.
+  Widget* widget() { return m_widget; }
+  void widget(Widget* widget) { m_widget = widget; }
+
+private:
+  Widget* m_widget;
+};
+
+class DragLeaveMessage : public DndMessage {
+public:
+  DragLeaveMessage(os::DragEvent& ev) : DndMessage(kDragLeaveMessage, ev) {}
+
+  // Returns the Widget that was under the mouse cursor just before it hovers a
+  // new widget.
+  Widget* widget() { return m_widget; }
+  void widget(Widget* widget) { m_widget = widget; }
+
+private:
+  Widget* m_widget;
+};
+
+class DragMessage : public DndMessage {
+public:
+  DragMessage(os::DragEvent& ev) : DndMessage(kDragMessage, ev) {}
+
+  // Returns the widget currently being hovered by the dragged elements.
+  Widget* widget() { return m_widget; }
+  // Sets the widget currently being hovered by the dragged elements.
+  void widget(Widget* widget) { m_widget = widget; }
+
+private:
+  Widget* m_widget;
+};
+
+class DropMessage : public DndMessage {
+public:
+  DropMessage(os::DragEvent& ev) : DndMessage(kDropMessage, ev) {}
+};
 
 } // namespace ui
 

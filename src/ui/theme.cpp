@@ -1,21 +1,23 @@
 // Aseprite UI Library
-// Copyright (C) 2019-2024  Igara Studio S.A.
+// Copyright (C) 2019-present  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "ui/theme.h"
 
+#include "base/utf8_decode.h"
 #include "gfx/point.h"
 #include "gfx/size.h"
-#include "os/font.h"
 #include "os/surface.h"
 #include "os/system.h"
+#include "text/font.h"
+#include "text/font_metrics.h"
 #include "ui/intern.h"
 #include "ui/manager.h"
 #include "ui/paint_event.h"
@@ -33,6 +35,10 @@
 namespace ui {
 
 namespace {
+
+// Colors for a simple default theme.
+constexpr const gfx::Color kBgColor = gfx::rgba(32, 32, 32, 255);
+constexpr const gfx::Color kFgColor = gfx::rgba(255, 255, 200, 255);
 
 int current_ui_scale = 1;       // Global UI Screen Scaling factor
 int old_ui_scale = 1;           // Add this field in InitThemeEvent
@@ -55,16 +61,14 @@ void for_each_layer(const int flags,
   const Style::Layer* bestLayer = nullptr;
 
   for (const auto& layer : style->layers()) {
-    if (bestLayer &&
-        bestLayer->type() != layer.type()) {
+    if (bestLayer && bestLayer->type() != layer.type()) {
       callback(*bestLayer);
       bestLayer = nullptr;
     }
 
-    if ((!layer.flags()
-         || (layer.flags() & flags) == layer.flags())
-        && (!bestLayer
-            || (bestLayer && compare_layer_flags(bestLayer->flags(), layer.flags()) <= 0))) {
+    if ((!layer.flags() || (layer.flags() & flags) == layer.flags()) &&
+        (!bestLayer ||
+         (bestLayer && compare_layer_flags(bestLayer->flags(), layer.flags()) <= 0))) {
       bestLayer = &layer;
     }
   }
@@ -77,10 +81,7 @@ void for_each_layer(const Widget* widget,
                     const Style* style,
                     std::function<void(const Style::Layer&)> callback)
 {
-  for_each_layer(
-    PaintWidgetPartInfo::getStyleFlagsForWidget(widget),
-    style,
-    callback);
+  for_each_layer(PaintWidgetPartInfo::getStyleFlagsForWidget(widget), style, callback);
 }
 
 std::function<void(int srcx, int srcy, int dstx, int dsty, int w, int h)>
@@ -100,23 +101,19 @@ getDrawSurfaceFunction(Graphics* g, os::Surface* sheet, gfx::Color color)
 
 PaintWidgetPartInfo::PaintWidgetPartInfo()
 {
-  bgColor = gfx::ColorNone;
-  styleFlags = 0;
-  text = nullptr;
-  mnemonic = 0;
-  icon = nullptr;
 }
 
 PaintWidgetPartInfo::PaintWidgetPartInfo(const Widget* widget)
 {
-  bgColor = (!widget->isTransparent() ?
-             widget->bgColor():
-             gfx::ColorNone);
+  bgColor = (!widget->isTransparent() ? widget->bgColor() : gfx::ColorNone);
   styleFlags = PaintWidgetPartInfo::getStyleFlagsForWidget(widget);
   text = &widget->text();
+  textBlob = widget->textBlob();
+  baseline = widget->textBaseline();
   mnemonic = widget->mnemonic();
   icon = nullptr;
-  if (const Style::Layer::IconSurfaceProvider* iconProvider = dynamic_cast<const Style::Layer::IconSurfaceProvider*>(widget)) {
+  if (const Style::Layer::IconSurfaceProvider* iconProvider =
+        dynamic_cast<const Style::Layer::IconSurfaceProvider*>(widget)) {
     icon = iconProvider->iconSurface();
   }
 }
@@ -124,15 +121,14 @@ PaintWidgetPartInfo::PaintWidgetPartInfo(const Widget* widget)
 // static
 int PaintWidgetPartInfo::getStyleFlagsForWidget(const Widget* widget)
 {
-  return
-    (widget->isEnabled() ? 0: Style::Layer::kDisabled) |
-    (widget->isSelected() ? Style::Layer::kSelected: 0) |
-    (widget->hasMouse() ? Style::Layer::kMouse: 0) |
-    (widget->hasFocus() ? Style::Layer::kFocus: 0) |
-    (widget->hasCapture() ? Style::Layer::kCapture: 0);
+  return (widget->isEnabled() ? 0 : Style::Layer::kDisabled) |
+         (widget->isSelected() ? Style::Layer::kSelected : 0) |
+         (widget->hasMouse() ? Style::Layer::kMouse : 0) |
+         (widget->hasFocus() ? Style::Layer::kFocus : 0) |
+         (widget->hasCapture() ? Style::Layer::kCapture : 0);
 }
 
-Theme::Theme()
+Theme::Theme() : m_fontMgr(text::FontMgr::Make())
 {
 }
 
@@ -142,8 +138,14 @@ Theme::~Theme()
     set_theme(nullptr, guiscale());
 }
 
+text::FontRef Theme::getDefaultFont() const
+{
+  return m_fontMgr->defaultFont(kDefaultFontHeight);
+}
+
 // static
-ui::Style Theme::m_defaultStyle(nullptr);
+ui::Style Theme::m_emptyStyle(nullptr);
+ui::Style Theme::m_simpleStyle(nullptr);
 
 void Theme::regenerateTheme()
 {
@@ -151,10 +153,46 @@ void Theme::regenerateTheme()
   onRegenerateTheme();
 }
 
+void Theme::initWidget(Widget* widget)
+{
+  if (m_simpleStyle.layers().empty()) {
+    Style::Layer bg;
+    Style::Layer br;
+    Style::Layer fg;
+    bg.setType(Style::Layer::Type::kBackground);
+    bg.setColor(kBgColor);
+    br.setType(Style::Layer::Type::kBorder);
+    br.setColor(kFgColor);
+    fg.setType(Style::Layer::Type::kText);
+    fg.setColor(kFgColor);
+    m_simpleStyle.layers().push_back(bg);
+    m_simpleStyle.layers().push_back(br);
+    m_simpleStyle.layers().push_back(fg);
+
+    bg.setFlags(Style::Layer::kSelected);
+    bg.setColor(kFgColor);
+    br.setFlags(Style::Layer::kSelected);
+    br.setColor(kFgColor);
+    fg.setFlags(Style::Layer::kSelected);
+    fg.setColor(kBgColor);
+    m_simpleStyle.layers().push_back(bg);
+    m_simpleStyle.layers().push_back(br);
+    m_simpleStyle.layers().push_back(fg);
+  }
+
+  widget->setFont(getDefaultFont());
+  widget->setStyle(&m_simpleStyle);
+
+  switch (widget->type()) {
+    case kViewScrollbarWidget:
+      static_cast<ScrollBar*>(widget)->setThumbStyle(&m_simpleStyle);
+      break;
+  }
+}
+
 void Theme::setDecorativeWidgetBounds(Widget* widget)
 {
   switch (widget->type()) {
-
     case kWindowTitleLabelWidget: {
       Window* window = widget->window();
       gfx::Rect labelBounds(widget->sizeHint());
@@ -163,9 +201,7 @@ void Theme::setDecorativeWidgetBounds(Widget* widget)
       if (widget->style())
         margin = widget->style()->margin();
 
-      labelBounds.offset(
-        windowBounds.x + margin.left(),
-        windowBounds.y + margin.top());
+      labelBounds.offset(windowBounds.x + margin.left(), windowBounds.y + margin.top());
 
       widget->setBounds(labelBounds);
       break;
@@ -175,19 +211,42 @@ void Theme::setDecorativeWidgetBounds(Widget* widget)
       Window* window = widget->window();
       gfx::Rect buttonBounds(widget->sizeHint());
       gfx::Rect windowBounds(window->bounds());
-      gfx::Border margin(0, 0, 0, 0);
+      gfx::Border margin;
       if (widget->style())
         margin = widget->style()->margin();
 
-      buttonBounds.offset(
-        windowBounds.x2() - margin.right() - buttonBounds.w,
-        windowBounds.y + margin.top());
+      buttonBounds.offset(windowBounds.x2() - margin.right() - buttonBounds.w,
+                          windowBounds.y + margin.top());
 
       widget->setBounds(buttonBounds);
       break;
     }
-
   }
+}
+
+Theme::TextColors Theme::getTextColors(Widget* widget)
+{
+  Theme::TextColors c;
+  c.text = Paint(kFgColor);
+  c.background = Paint(kBgColor);
+  c.selectedText = Paint(kBgColor);
+  c.selectedBackground = Paint(kFgColor);
+  c.disabledText = Paint(kFgColor);
+  c.disabledBackground = Paint(kBgColor);
+  c.placeholderText = Paint(kFgColor);
+  return c;
+}
+
+void Theme::paintListBox(PaintEvent& ev)
+{
+  Graphics* g = ev.graphics();
+  g->fillRect(kBgColor, g->getClipBounds());
+}
+
+void Theme::paintViewViewport(PaintEvent& ev)
+{
+  Graphics* g = ev.graphics();
+  g->fillRect(kBgColor, g->getClipBounds());
 }
 
 void Theme::paintWidgetPart(Graphics* g,
@@ -204,14 +263,20 @@ void Theme::paintWidgetPart(Graphics* g,
 
   gfx::Rect rc = bounds;
   gfx::Color outBgColor = gfx::ColorNone;
-  for_each_layer(
-    info.styleFlags, style,
-    [this, g, style, &info, &rc, &outBgColor]
-    (const Style::Layer& layer) {
-      paintLayer(g, style, layer,
-                 (info.text ? *info.text: std::string()),
-                 info.mnemonic, info.icon, rc, outBgColor);
-    });
+  for_each_layer(info.styleFlags,
+                 style,
+                 [this, g, style, &info, &rc, &outBgColor](const Style::Layer& layer) {
+                   paintLayer(g,
+                              style,
+                              layer,
+                              (info.text ? *info.text : std::string()),
+                              info.textBlob,
+                              info.baseline,
+                              info.mnemonic,
+                              info.icon,
+                              rc,
+                              outBgColor);
+                 });
 }
 
 void Theme::paintWidget(Graphics* g,
@@ -258,12 +323,10 @@ void Theme::paintTooltip(Graphics* g,
     gfx::Size topLeft;
     gfx::Size center;
     gfx::Size bottomRight;
-    calcSlices(widget, arrowStyle,
-               topLeft, center, bottomRight);
+    calcSlices(widget, arrowStyle, topLeft, center, bottomRight);
 
-    gfx::Rect clip, rc(0, 0,
-                       topLeft.w+center.w+bottomRight.w,
-                       topLeft.h+center.h+bottomRight.h);
+    gfx::Rect clip,
+      rc(0, 0, topLeft.w + center.w + bottomRight.w, topLeft.h + center.h + bottomRight.h);
 
     if (arrowAlign & LEFT) {
       clip.w = topLeft.w;
@@ -272,12 +335,12 @@ void Theme::paintTooltip(Graphics* g,
     }
     else if (arrowAlign & RIGHT) {
       clip.w = bottomRight.w;
-      clip.x = bounds.x+bounds.w-clip.w;
-      rc.x = bounds.x2()-rc.w;
+      clip.x = bounds.x + bounds.w - clip.w;
+      rc.x = bounds.x2() - rc.w;
     }
     else {
       clip.w = center.w;
-      clip.x = target.x+target.w/2-clip.w/2;
+      clip.x = target.x + target.w / 2 - clip.w / 2;
       rc.x = clip.x - topLeft.w;
     }
 
@@ -288,12 +351,12 @@ void Theme::paintTooltip(Graphics* g,
     }
     else if (arrowAlign & BOTTOM) {
       clip.h = bottomRight.h;
-      clip.y = bounds.y+bounds.h-clip.h;
-      rc.y = bounds.y2()-rc.h;
+      clip.y = bounds.y + bounds.h - clip.h;
+      rc.y = bounds.y2() - rc.h;
     }
     else {
       clip.h = center.h;
-      clip.y = target.y+target.h/2-clip.h/2;
+      clip.y = target.y + target.h / 2 - clip.h / 2;
       rc.y = clip.y - topLeft.h;
     }
 
@@ -303,20 +366,18 @@ void Theme::paintTooltip(Graphics* g,
   }
 }
 
-void Theme::paintTextBoxWithStyle(Graphics* g,
-                                  const Widget* widget)
+void Theme::paintTextBoxWithStyle(Graphics* g, const Widget* widget)
 {
   gfx::Color bg = gfx::ColorNone, fg = gfx::ColorNone;
 
-  for_each_layer(
-    PaintWidgetPartInfo::getStyleFlagsForWidget(widget),
-    widget->style(),
-    [&fg, &bg](const Style::Layer& layer) {
-      switch (layer.type()) {
-        case Style::Layer::Type::kBackground: bg = layer.color(); break;
-        case Style::Layer::Type::kText:       fg = layer.color(); break;
-      }
-    });
+  for_each_layer(PaintWidgetPartInfo::getStyleFlagsForWidget(widget),
+                 widget->style(),
+                 [&fg, &bg](const Style::Layer& layer) {
+                   switch (layer.type()) {
+                     case Style::Layer::Type::kBackground: bg = layer.color(); break;
+                     case Style::Layer::Type::kText:       fg = layer.color(); break;
+                   }
+                 });
 
   if (fg != gfx::ColorNone)
     Theme::drawTextBox(g, widget, nullptr, nullptr, bg, fg);
@@ -326,6 +387,8 @@ void Theme::paintLayer(Graphics* g,
                        const Style* style,
                        const Style::Layer& layer,
                        const std::string& text,
+                       text::TextBlobRef textBlob,
+                       const float baseline,
                        const int mnemonic,
                        os::Surface* providedIcon,
                        gfx::Rect& rc,
@@ -336,16 +399,17 @@ void Theme::paintLayer(Graphics* g,
     return;
 
   switch (layer.type()) {
-
     case Style::Layer::Type::kBackground:
     case Style::Layer::Type::kBackgroundBorder:
-      if (layer.spriteSheet() &&
-          !layer.spriteBounds().isEmpty()) {
+      if (layer.spriteSheet() && !layer.spriteBounds().isEmpty()) {
         if (!layer.slicesBounds().isEmpty()) {
-          Theme::drawSlices(g, layer.spriteSheet(), rc,
+          Theme::drawSlices(g,
+                            layer.spriteSheet(),
+                            rc,
                             layer.spriteBounds(),
                             layer.slicesBounds(),
-                            layer.color(), true);
+                            layer.color(),
+                            true);
 
           if (layer.type() == Style::Layer::Type::kBackgroundBorder) {
             rc.x += layer.slicesBounds().x;
@@ -358,50 +422,58 @@ void Theme::paintLayer(Graphics* g,
         else {
           IntersectClip clip(g, rc);
           if (clip) {
-            auto draw = getDrawSurfaceFunction(
-              g, layer.spriteSheet(), layer.color());
+            auto draw = getDrawSurfaceFunction(g, layer.spriteSheet(), layer.color());
 
             switch (layer.align()) {
-
               // Horizontal line
-              case MIDDLE:
-                for (int x=rc.x; x<rc.x2(); x+=layer.spriteBounds().w) {
+              case MIDDLE: {
+                const float y = guiscaled_center(rc.y, rc.h, layer.spriteBounds().h);
+                for (int x = rc.x; x < rc.x2(); x += layer.spriteBounds().w) {
                   draw(layer.spriteBounds().x,
                        layer.spriteBounds().y,
-                       x, rc.y+rc.h/2-layer.spriteBounds().h/2,
+                       x,
+                       y,
                        layer.spriteBounds().w,
                        layer.spriteBounds().h);
                 }
                 break;
+              }
 
               // Vertical line
-              case CENTER:
-                for (int y=rc.y; y<rc.y2(); y+=layer.spriteBounds().h) {
+              case CENTER: {
+                const float x = guiscaled_center(rc.x, rc.w, layer.spriteBounds().w);
+                for (int y = rc.y; y < rc.y2(); y += layer.spriteBounds().h) {
                   draw(layer.spriteBounds().x,
                        layer.spriteBounds().y,
-                       rc.x+rc.w/2-layer.spriteBounds().w/2, y,
+                       x,
+                       y,
                        layer.spriteBounds().w,
                        layer.spriteBounds().h);
                 }
                 break;
+              }
 
               // One instance
-              case CENTER | MIDDLE:
+              case CENTER | MIDDLE: {
+                const float x = guiscaled_center(rc.x, rc.w, layer.spriteBounds().w);
+                const float y = guiscaled_center(rc.y, rc.h, layer.spriteBounds().h);
                 draw(layer.spriteBounds().x,
                      layer.spriteBounds().y,
-                     rc.x+rc.w/2-layer.spriteBounds().w/2,
-                     rc.y+rc.h/2-layer.spriteBounds().h/2,
+                     x,
+                     y,
                      layer.spriteBounds().w,
                      layer.spriteBounds().h);
                 break;
+              }
 
               // Pattern
               case 0:
-                for (int y=rc.y; y<rc.y2(); y+=layer.spriteBounds().h) {
-                  for (int x=rc.x; x<rc.x2(); x+=layer.spriteBounds().w)
+                for (int y = rc.y; y < rc.y2(); y += layer.spriteBounds().h) {
+                  for (int x = rc.x; x < rc.x2(); x += layer.spriteBounds().w)
                     draw(layer.spriteBounds().x,
                          layer.spriteBounds().y,
-                         x, y,
+                         x,
+                         y,
                          layer.spriteBounds().w,
                          layer.spriteBounds().h);
                 }
@@ -417,13 +489,15 @@ void Theme::paintLayer(Graphics* g,
       break;
 
     case Style::Layer::Type::kBorder:
-      if (layer.spriteSheet() &&
-          !layer.spriteBounds().isEmpty() &&
+      if (layer.spriteSheet() && !layer.spriteBounds().isEmpty() &&
           !layer.slicesBounds().isEmpty()) {
-        Theme::drawSlices(g, layer.spriteSheet(), rc,
+        Theme::drawSlices(g,
+                          layer.spriteSheet(),
+                          rc,
                           layer.spriteBounds(),
                           layer.slicesBounds(),
-                          layer.color(), false);
+                          layer.color(),
+                          false);
 
         rc.x += layer.slicesBounds().x;
         rc.y += layer.slicesBounds().y;
@@ -436,52 +510,57 @@ void Theme::paintLayer(Graphics* g,
       break;
 
     case Style::Layer::Type::kText:
+      if (text.empty())
+        break;
+
       if (layer.color() != gfx::ColorNone) {
-        os::FontRef oldFont = AddRef(g->font());
+        text::FontRef oldFont = g->font();
         if (style->font())
-          g->setFont(AddRef(style->font()));
+          g->setFont(style->font());
 
         if (layer.align() & WORDWRAP) {
           gfx::Rect textBounds = rc;
           textBounds.offset(layer.offset());
 
-          g->drawAlignedUIText(text,
-                               layer.color(),
-                               bgColor,
-                               textBounds, layer.align());
+          g->drawAlignedUIText(text, layer.color(), bgColor, textBounds, layer.align());
         }
         else {
-          gfx::Size textSize = g->measureUIText(text);
-          gfx::Point pt;
-          gfx::Border undef = Style::UndefinedBorder();
-          gfx::Border padding = style->padding();
-          if (padding.left() == undef.left()) padding.left(0);
-          if (padding.right() == undef.right()) padding.right(0);
-          if (padding.top() == undef.top()) padding.top(0);
-          if (padding.bottom() == undef.bottom()) padding.bottom(0);
+          if (!textBlob || style->font() != nullptr)
+            textBlob = text::TextBlob::MakeWithShaper(m_fontMgr, g->font(), text);
 
-          if (layer.align() & LEFT)
-            pt.x = rc.x+padding.left();
-          else if (layer.align() & RIGHT)
-            pt.x = rc.x+rc.w-textSize.w-padding.right();
-          else {
-            pt.x = CALC_FOR_CENTER(rc.x+padding.left(), rc.w-padding.width(), textSize.w);
+          if (textBlob) {
+            const gfx::RectF blobSize = textBlob->bounds();
+            const gfx::Border padding = style->padding();
+            gfx::PointF pt;
+
+            if (layer.align() & LEFT)
+              pt.x = rc.x + padding.left();
+            else if (layer.align() & RIGHT)
+              pt.x = rc.x + rc.w - blobSize.w - padding.right();
+            else
+              pt.x = guiscaled_center(rc.x + padding.left(), rc.w - padding.width(), blobSize.w);
+
+            if (layer.align() & TOP)
+              pt.y = rc.y + padding.top();
+            else if (layer.align() & BOTTOM)
+              pt.y = rc.y + rc.h - blobSize.h - padding.bottom();
+            else
+              pt.y = baseline - textBlob->baseline();
+
+            pt += layer.offset();
+
+            Paint paint;
+            if (gfx::geta(bgColor) > 0) { // Paint background
+              paint.color(bgColor);
+              paint.style(os::Paint::Fill);
+              g->drawRect(gfx::RectF(textBlob->bounds()).offset(pt), paint);
+            }
+            paint.color(layer.color());
+            g->drawTextBlob(textBlob, gfx::PointF(pt), paint);
+
+            if (style->mnemonics() && mnemonic != 0)
+              drawMnemonicUnderline(g, text, textBlob, pt, mnemonic, paint);
           }
-
-          if (layer.align() & TOP)
-            pt.y = rc.y+padding.top();
-          else if (layer.align() & BOTTOM)
-            pt.y = rc.y+rc.h-textSize.h-padding.bottom();
-          else {
-            pt.y = CALC_FOR_CENTER(rc.y+padding.top(), rc.h-padding.height(), textSize.h);
-          }
-
-          pt += layer.offset();
-
-          g->drawUIText(text,
-                        layer.color(),
-                        bgColor,
-                        pt, style->mnemonics() ? mnemonic : 0);
         }
 
         if (style->font())
@@ -492,29 +571,24 @@ void Theme::paintLayer(Graphics* g,
     case Style::Layer::Type::kIcon: {
       os::Surface* icon = providedIcon ? providedIcon : layer.icon();
       if (icon) {
-        gfx::Size iconSize(icon->width(), icon->height());
+        const gfx::Size iconSize(icon->width(), icon->height());
+        const gfx::Border padding = style->padding();
         gfx::Point pt;
-        gfx::Border undef = Style::UndefinedBorder();
-        gfx::Border padding = style->padding();
-        if (padding.left() == undef.left()) padding.left(0);
-        if (padding.right() == undef.right()) padding.right(0);
-        if (padding.top() == undef.top()) padding.top(0);
-        if (padding.bottom() == undef.bottom()) padding.bottom(0);
 
         if (layer.align() & LEFT)
-          pt.x = rc.x+padding.left();
+          pt.x = rc.x + padding.left();
         else if (layer.align() & RIGHT)
-          pt.x = rc.x+rc.w-iconSize.w-padding.right();
+          pt.x = rc.x + rc.w - iconSize.w - padding.right();
         else {
-          pt.x = CALC_FOR_CENTER(rc.x+padding.left(), rc.w-padding.width(), iconSize.w);
+          pt.x = guiscaled_center(rc.x + padding.left(), rc.w - padding.width(), iconSize.w);
         }
 
         if (layer.align() & TOP)
-          pt.y = rc.y+padding.top();
+          pt.y = rc.y + padding.top();
         else if (layer.align() & BOTTOM)
-          pt.y = rc.y+rc.h-iconSize.h-padding.bottom();
+          pt.y = rc.y + rc.h - iconSize.h - padding.bottom();
         else {
-          pt.y = CALC_FOR_CENTER(rc.y+padding.top(), rc.h-padding.height(), iconSize.h);
+          pt.y = guiscaled_center(rc.y + padding.top(), rc.h - padding.height(), iconSize.h);
         }
 
         pt += layer.offset();
@@ -526,32 +600,29 @@ void Theme::paintLayer(Graphics* g,
       }
       break;
     }
-
   }
 }
 
-gfx::Size Theme::calcSizeHint(const Widget* widget,
-                              const Style* style)
+gfx::Size Theme::calcSizeHint(const Widget* widget, const Style* style)
 {
   gfx::Size sizeHint;
   gfx::Border borderHint;
   gfx::Rect textHint;
   int textAlign;
-  calcWidgetMetrics(widget, style, sizeHint, borderHint,
-                    textHint, textAlign);
+  calcWidgetMetrics(widget, style, sizeHint, borderHint, textHint, textAlign);
   return sizeHint;
 }
 
 void Theme::calcTextInfo(const Widget* widget,
                          const Style* style,
                          const gfx::Rect& bounds,
-                         gfx::Rect& textBounds, int& textAlign)
+                         gfx::Rect& textBounds,
+                         int& textAlign)
 {
   gfx::Size sizeHint;
   gfx::Border borderHint;
   gfx::Rect textHint;
-  calcWidgetMetrics(widget, style, sizeHint, borderHint,
-                    textHint, textAlign);
+  calcWidgetMetrics(widget, style, sizeHint, borderHint, textHint, textAlign);
 
   textBounds = bounds;
   textBounds.shrink(borderHint);
@@ -562,25 +633,27 @@ void Theme::measureLayer(const Widget* widget,
                          const Style* style,
                          const Style::Layer& layer,
                          gfx::Border& borderHint,
-                         gfx::Rect& textHint, int& textAlign,
-                         gfx::Size& iconHint, int& iconAlign)
+                         gfx::Rect& textHint,
+                         int& textAlign,
+                         gfx::Size& iconHint,
+                         int& iconAlign)
 {
   ASSERT(style);
   if (!style)
     return;
 
   switch (layer.type()) {
-
     case Style::Layer::Type::kBackground:
     case Style::Layer::Type::kBackgroundBorder:
     case Style::Layer::Type::kBorder:
-      if (layer.spriteSheet() &&
-          !layer.spriteBounds().isEmpty()) {
+      if (layer.spriteSheet() && !layer.spriteBounds().isEmpty()) {
         if (!layer.slicesBounds().isEmpty()) {
           borderHint.left(std::max(borderHint.left(), layer.slicesBounds().x));
           borderHint.top(std::max(borderHint.top(), layer.slicesBounds().y));
-          borderHint.right(std::max(borderHint.right(), layer.spriteBounds().w - layer.slicesBounds().x2()));
-          borderHint.bottom(std::max(borderHint.bottom(), layer.spriteBounds().h - layer.slicesBounds().y2()));
+          borderHint.right(
+            std::max(borderHint.right(), layer.spriteBounds().w - layer.slicesBounds().x2()));
+          borderHint.bottom(
+            std::max(borderHint.bottom(), layer.spriteBounds().h - layer.slicesBounds().y2()));
         }
         else {
           iconHint.w = std::max(iconHint.w, layer.spriteBounds().w);
@@ -591,44 +664,48 @@ void Theme::measureLayer(const Widget* widget,
 
     case Style::Layer::Type::kText:
       if (layer.color() != gfx::ColorNone) {
-        os::Font* font = (style->font() ? style->font():
-                                          widget->font());
-        gfx::Size textSize(Graphics::measureUITextLength(widget->text(), font),
-                           font->height());
+        const text::FontRef& styleFont = style->font();
+        gfx::Size textSize;
+        if (styleFont && styleFont != widget->font()) {
+          textSize = gfx::Size(styleFont->textLength(widget->text()), styleFont->lineHeight());
+        }
+        else {
+          // We can use Widget::textSize() because we're going to use
+          // the widget font and, probably, the cached TextBlob size.
+          textSize = widget->textSize();
+        }
 
         textHint.offset(layer.offset());
-        textHint.w = std::max(textHint.w, textSize.w+ABS(layer.offset().x));
-        textHint.h = std::max(textHint.h, textSize.h+ABS(layer.offset().y));
+        textHint.w = std::max(textHint.w, textSize.w + ABS(layer.offset().x));
+        textHint.h = std::max(textHint.h, textSize.h + ABS(layer.offset().y));
         textAlign = layer.align();
       }
       break;
 
     case Style::Layer::Type::kIcon: {
       const os::Surface* icon = layer.icon();
-      if (const Style::Layer::IconSurfaceProvider* iconProvider = dynamic_cast<const Style::Layer::IconSurfaceProvider*>(widget)) {
+      if (const Style::Layer::IconSurfaceProvider* iconProvider =
+            dynamic_cast<const Style::Layer::IconSurfaceProvider*>(widget)) {
         icon = iconProvider->iconSurface() ? iconProvider->iconSurface() : icon;
       }
 
       if (icon) {
-        iconHint.w = std::max(iconHint.w, icon->width()+ABS(layer.offset().x));
-        iconHint.h = std::max(iconHint.h, icon->height()+ABS(layer.offset().y));
+        iconHint.w = std::max(iconHint.w, icon->width() + ABS(layer.offset().x));
+        iconHint.h = std::max(iconHint.h, icon->height() + ABS(layer.offset().y));
         iconAlign = layer.align();
       }
       break;
     }
-
   }
 }
 
-gfx::Border Theme::calcBorder(const Widget* widget,
-                              const Style* style)
+gfx::Border Theme::calcBorder(const Widget* widget, const Style* style)
 {
   gfx::Size sizeHint;
   gfx::Border borderHint;
   gfx::Rect textHint;
   int textAlign;
-  calcWidgetMetrics(widget, style, sizeHint, borderHint,
-                    textHint, textAlign);
+  calcWidgetMetrics(widget, style, sizeHint, borderHint, textHint, textAlign);
   return borderHint;
 }
 
@@ -641,47 +718,37 @@ void Theme::calcSlices(const Widget* widget,
   ASSERT(widget);
   ASSERT(style);
 
-  for_each_layer(
-    widget, style,
-    [&topLeft, &center, &bottomRight]
-    (const Style::Layer& layer) {
-      if (layer.spriteSheet() &&
-          !layer.spriteBounds().isEmpty() &&
-          !layer.slicesBounds().isEmpty()) {
-        gfx::Rect sprite = layer.spriteBounds();
-        gfx::Rect slices = layer.slicesBounds();
-        topLeft.w = std::max(topLeft.w, slices.x);
-        topLeft.h = std::max(topLeft.h, slices.y);
-        center.w = std::max(center.w, slices.w);
-        center.h = std::max(center.h, slices.h);
-        bottomRight.w = std::max(bottomRight.w, sprite.w - slices.x2());
-        bottomRight.h = std::max(bottomRight.h, sprite.h - slices.y2());
-      }
-    });
+  for_each_layer(widget, style, [&topLeft, &center, &bottomRight](const Style::Layer& layer) {
+    if (layer.spriteSheet() && !layer.spriteBounds().isEmpty() && !layer.slicesBounds().isEmpty()) {
+      gfx::Rect sprite = layer.spriteBounds();
+      gfx::Rect slices = layer.slicesBounds();
+      topLeft.w = std::max(topLeft.w, slices.x);
+      topLeft.h = std::max(topLeft.h, slices.y);
+      center.w = std::max(center.w, slices.w);
+      center.h = std::max(center.h, slices.h);
+      bottomRight.w = std::max(bottomRight.w, sprite.w - slices.x2());
+      bottomRight.h = std::max(bottomRight.h, sprite.h - slices.y2());
+    }
+  });
 }
 
-gfx::Color Theme::calcBgColor(const Widget* widget,
-                              const Style* style)
+gfx::Color Theme::calcBgColor(const Widget* widget, const Style* style)
 {
   ASSERT(widget);
   ASSERT(style);
 
   gfx::Color bgColor = gfx::ColorNone;
 
-  for_each_layer(
-    widget, style,
-    [&bgColor]
-    (const Style::Layer& layer) {
-      if (layer.type() == Style::Layer::Type::kBackground ||
-          layer.type() == Style::Layer::Type::kBackgroundBorder)
-        bgColor = layer.color();
-    });
+  for_each_layer(widget, style, [&bgColor](const Style::Layer& layer) {
+    if (layer.type() == Style::Layer::Type::kBackground ||
+        layer.type() == Style::Layer::Type::kBackgroundBorder)
+      bgColor = layer.color();
+  });
 
   return bgColor;
 }
 
-gfx::Size Theme::calcMinSize(const Widget* widget,
-                              const Style* style)
+gfx::Size Theme::calcMinSize(const Widget* widget, const Style* style)
 {
   ASSERT(widget);
   ASSERT(style);
@@ -696,8 +763,7 @@ gfx::Size Theme::calcMinSize(const Widget* widget,
   return sz;
 }
 
-gfx::Size Theme::calcMaxSize(const Widget* widget,
-                              const Style* style)
+gfx::Size Theme::calcMaxSize(const Widget* widget, const Style* style)
 {
   ASSERT(widget);
   ASSERT(style);
@@ -706,9 +772,9 @@ gfx::Size Theme::calcMaxSize(const Widget* widget,
 
   int maxInt = std::numeric_limits<int>::max();
   if (sz.w == maxInt || style->maxSize().w < maxInt)
-   sz.w = style->maxSize().w;
+    sz.w = style->maxSize().w;
   if (sz.h == maxInt || style->maxSize().h < maxInt)
-   sz.h = style->maxSize().h;
+    sz.h = style->maxSize().h;
 
   return sz;
 }
@@ -717,7 +783,8 @@ void Theme::calcWidgetMetrics(const Widget* widget,
                               const Style* style,
                               gfx::Size& sizeHint,
                               gfx::Border& borderHint,
-                              gfx::Rect& textHint, int& textAlign)
+                              gfx::Rect& textHint,
+                              int& textAlign)
 {
   ASSERT(widget);
   ASSERT(style);
@@ -734,27 +801,15 @@ void Theme::calcWidgetMetrics(const Widget* widget,
   int iconAlign = CENTER | MIDDLE;
 
   for_each_layer(
-    widget, style,
-    [this, widget, style, &borderHint,
-     &textHint, &textAlign, &iconHint, &iconAlign]
-    (const Style::Layer& layer) {
-      measureLayer(widget, style, layer,
-                   borderHint,
-                   textHint, textAlign,
-                   iconHint, iconAlign);
+    widget,
+    style,
+    [this, widget, style, &borderHint, &textHint, &textAlign, &iconHint, &iconAlign](
+      const Style::Layer& layer) {
+      measureLayer(widget, style, layer, borderHint, textHint, textAlign, iconHint, iconAlign);
     });
 
-  gfx::Border undef = Style::UndefinedBorder();
-
-  if (style->border().left() != undef.left()) borderHint.left(style->border().left());
-  if (style->border().top() != undef.top()) borderHint.top(style->border().top());
-  if (style->border().right() != undef.right()) borderHint.right(style->border().right());
-  if (style->border().bottom() != undef.bottom()) borderHint.bottom(style->border().bottom());
-
-  if (style->padding().left() != undef.left()) paddingHint.left(style->padding().left());
-  if (style->padding().top() != undef.top()) paddingHint.top(style->padding().top());
-  if (style->padding().right() != undef.right()) paddingHint.right(style->padding().right());
-  if (style->padding().bottom() != undef.bottom()) paddingHint.bottom(style->padding().bottom());
+  Style::applyOnlyDefinedBorders(borderHint, style->rawBorder());
+  Style::applyOnlyDefinedBorders(paddingHint, style->rawPadding());
 
   sizeHint = gfx::Size(borderHint.width() + paddingHint.width(),
                        borderHint.height() + paddingHint.height());
@@ -779,20 +834,19 @@ void set_theme(Theme* theme, const int uiscale)
 {
   old_ui_scale = current_ui_scale;
   current_ui_scale = uiscale;
+  current_theme = theme;
 
-  if (theme) {
+  if (theme)
     theme->regenerateTheme();
 
-    current_theme = theme;
+  // Set the theme for all widgets (even if the theme is nullptr, so
+  // widgets don't contain a pointer to a destroyed theme).
+  details::reinitThemeForAllWidgets();
 
-    // Set the theme for all widgets
-    details::reinitThemeForAllWidgets();
-
-    // Reinitialize all widget using the new theme/uiscale
-    if (Manager* manager = Manager::getDefault()) {
-      manager->initTheme();
-      manager->invalidate();
-    }
+  // Reinitialize all widget using the new theme/uiscale
+  if (Manager* manager = Manager::getDefault()) {
+    manager->initTheme();
+    manager->invalidate();
   }
 
   old_ui_scale = current_ui_scale;
@@ -814,7 +868,8 @@ int details::old_guiscale()
 }
 
 // static
-void Theme::drawSlices(Graphics* g, os::Surface* sheet,
+void Theme::drawSlices(Graphics* g,
+                       os::Surface* sheet,
                        const gfx::Rect& rc,
                        const gfx::Rect& sprite,
                        const gfx::Rect& slices,
@@ -827,17 +882,20 @@ void Theme::drawSlices(Graphics* g, os::Surface* sheet,
 }
 
 // static
-void Theme::drawTextBox(Graphics* g, const Widget* widget,
-                        int* w, int* h, gfx::Color bg, gfx::Color fg)
+void Theme::drawTextBox(Graphics* g,
+                        const Widget* widget,
+                        int* w,
+                        int* h,
+                        gfx::Color bg,
+                        gfx::Color fg)
 {
-  View* view = (g ? View::getView(widget): nullptr);
+  View* view = (g ? View::getView(widget) : nullptr);
   char* text = const_cast<char*>(widget->text().c_str());
-  char* beg, *end;
-  int x1, y1;
+  char *beg, *end;
   int x, y, chr, len;
   gfx::Point scroll;
-  int textheight = widget->textHeight();
-  os::Font* font = widget->font();
+  const text::FontRef& font = widget->font();
+  const int lineheight = font->lineHeight();
   char *beg_end, *old_end;
   int width;
   gfx::Rect vp;
@@ -850,8 +908,9 @@ void Theme::drawTextBox(Graphics* g, const Widget* widget,
     vp = widget->clientBounds();
     scroll.x = scroll.y = 0;
   }
-  x1 = widget->clientBounds().x + widget->border().left();
-  y1 = widget->clientBounds().y + widget->border().top();
+
+  const int x1 = widget->clientBounds().x + widget->border().left();
+  const int y1 = widget->clientBounds().y + widget->border().top();
 
   // Fill background
   if (g)
@@ -883,14 +942,14 @@ void Theme::drawTextBox(Graphics* g, const Widget* widget,
       else {
         width = vp.w;
       }
-      width -= widget->border().width();
 #endif
     }
+    width -= widget->border().width();
   }
 
   // Draw line-by-line
   y = y1;
-  for (beg=end=text; end; ) {
+  for (beg = end = text; end;) {
     x = x1;
 
     // Without word-wrap
@@ -904,7 +963,7 @@ void Theme::drawTextBox(Graphics* g, const Widget* widget,
     // With word-wrap
     else {
       old_end = nullptr;
-      for (beg_end=beg;;) {
+      for (beg_end = beg;;) {
         end = std::strpbrk(beg_end, " \n");
         if (end) {
           chr = *end;
@@ -912,7 +971,7 @@ void Theme::drawTextBox(Graphics* g, const Widget* widget,
         }
 
         // To here we can print
-        if ((old_end) && (x+font->textLength(beg) > x1+width-scroll.x)) {
+        if ((old_end) && (x + font->textLength(beg) > x1 + width - scroll.x)) {
           if (end)
             *end = chr;
 
@@ -928,7 +987,7 @@ void Theme::drawTextBox(Graphics* g, const Widget* widget,
             break;
 
           *end = chr;
-          beg_end = end+1;
+          beg_end = end + 1;
         }
         // We are in the end of text
         else
@@ -941,14 +1000,14 @@ void Theme::drawTextBox(Graphics* g, const Widget* widget,
     len = font->textLength(beg);
 
     // Render the text
-    if (g) {
+    if (g && len > 0) {
       int xout;
 
       if (widget->align() & CENTER)
-        xout = x + width/2 - len/2;
+        xout = x + width / 2 - len / 2;
       else if (widget->align() & RIGHT)
         xout = x + width - len;
-      else                      // Left align
+      else // Left align
         xout = x;
 
       g->drawText(beg, fg, gfx::ColorNone, gfx::Point(xout, y));
@@ -957,19 +1016,78 @@ void Theme::drawTextBox(Graphics* g, const Widget* widget,
     if (w)
       *w = std::max(*w, len);
 
-    y += textheight;
+    y += lineheight;
 
     if (end) {
       *end = chr;
-      beg = end+1;
+      beg = end + 1;
     }
   }
 
   if (h)
     *h = (y - y1 + scroll.y);
 
-  if (w) *w += widget->border().width();
-  if (h) *h += widget->border().height();
+  if (w)
+    *w += widget->border().width();
+  if (h)
+    *h += widget->border().height();
+}
+
+// static
+void Theme::drawMnemonicUnderline(Graphics* g,
+                                  const std::string& text,
+                                  text::TextBlobRef textBlob,
+                                  const gfx::PointF& pt,
+                                  const int mnemonic,
+                                  const Paint& paint)
+{
+  base::utf8_decode decode(text);
+  int pos = decode.pos() - text.begin();
+  int mnemonicUtf8Pos = -1;
+  while (int chr = decode.next()) {
+    if (std::tolower(chr) == std::tolower(mnemonic)) {
+      mnemonicUtf8Pos = pos;
+      break;
+    }
+    pos = decode.pos() - text.begin();
+  }
+
+  if (mnemonicUtf8Pos >= 0) {
+    decode = base::utf8_decode(text);
+    decode.next(); // Go to first char
+    size_t glyphUtf8Begin = 0;
+
+    float baseline = textBlob->baseline();
+    textBlob->visitRuns([g, baseline, mnemonicUtf8Pos, pt, &paint, &decode, &glyphUtf8Begin, &text](
+                          text::TextBlob::RunInfo& info) {
+      for (int i = 0; i < info.glyphCount; ++i, decode.next()) {
+        // TODO This doesn't work because the TextBlob::RunInfo::clusters is nullptr at this
+        //      point, it's only valid when the RunHandler::commitRunBuffer()
+        if (info.clusters)
+          glyphUtf8Begin = info.getGlyphUtf8Range(i).begin;
+
+        if (mnemonicUtf8Pos == glyphUtf8Begin) {
+          text::FontMetrics metrics;
+          info.font->metrics(&metrics);
+
+          gfx::RectF mnemonicBounds = info.getGlyphBounds(i);
+          float thickness = metrics.underlineThickness * guiscale();
+          if (thickness < 1.0f)
+            thickness = 1.0f;
+
+          mnemonicBounds = gfx::RectF(pt.x + mnemonicBounds.x,
+                                      pt.y + baseline + metrics.underlinePosition * guiscale(),
+                                      mnemonicBounds.w,
+                                      thickness);
+
+          g->drawRect(mnemonicBounds, paint);
+          break;
+        }
+
+        glyphUtf8Begin = decode.pos() - text.begin();
+      }
+    });
+  }
 }
 
 } // namespace ui

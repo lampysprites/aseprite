@@ -6,7 +6,7 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/ui/icon_button.h"
@@ -23,32 +23,34 @@ namespace app {
 using namespace ui;
 using namespace app::skin;
 
-IconButton::IconButton(const SkinPartPtr& part)
-  : Button("")
-  , m_part(part)
+IconButton::IconButton(const SkinPartPtr& part) : Button(""), m_part(part)
 {
   initTheme();
 }
 
+void IconButton::setIcon(const skin::SkinPartPtr& part)
+{
+  m_part = part;
+  invalidate();
+}
+
 void IconButton::onInitTheme(InitThemeEvent& ev)
 {
-  Button::onInitTheme(ev);
-
   auto theme = SkinTheme::get(this);
   setBgColor(theme->colors.menuitemNormalFace());
+
+  Button::onInitTheme(ev);
 }
 
 void IconButton::onSizeHint(SizeHintEvent& ev)
 {
   os::Surface* icon = m_part->bitmap(0);
-  ev.setSizeHint(
-    gfx::Size(icon->width(),
-              icon->height()) + 4*guiscale());
+  ev.setSizeHint(gfx::Size(icon->width(), icon->height()) + 4 * guiscale());
 }
 
 void IconButton::onPaint(PaintEvent& ev)
 {
-  auto theme = SkinTheme::get(this);
+  const auto* theme = SkinTheme::get(this);
   Graphics* g = ev.graphics();
   gfx::Color fg, bg;
 
@@ -65,14 +67,16 @@ void IconButton::onPaint(PaintEvent& ev)
     bg = bgColor();
   }
 
-  g->fillRect(bg, g->getClipBounds());
+  if (!isTransparent()) {
+    g->fillRect(bg, g->getClipBounds());
+  }
 
-  gfx::Rect bounds = clientBounds();
+  const gfx::Rect bounds = clientBounds();
   os::Surface* icon = m_part->bitmap(0);
-  g->drawColoredRgbaSurface(
-    icon, fg,
-    bounds.x+bounds.w/2-icon->width()/2,
-    bounds.y+bounds.h/2-icon->height()/2);
+  g->drawColoredRgbaSurface(icon,
+                            fg,
+                            bounds.x + bounds.w / 2 - icon->width() / 2,
+                            bounds.y + bounds.h / 2 - icon->height() / 2);
 }
 
 } // namespace app

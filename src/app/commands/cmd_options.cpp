@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2018-2024  Igara Studio S.A.
+// Copyright (C) 2018-present  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -18,14 +18,19 @@
 #include "app/extensions.h"
 #include "app/file/file.h"
 #include "app/file_selector.h"
+#include "app/fonts/font_data.h"
+#include "app/fonts/fonts.h"
 #include "app/i18n/strings.h"
 #include "app/ini_file.h"
 #include "app/launcher.h"
+#include "app/match_words.h"
 #include "app/modules/gui.h"
 #include "app/pref/preferences.h"
 #include "app/recent_files.h"
 #include "app/resource_finder.h"
+#include "app/tools/tool_box.h"
 #include "app/tx.h"
+#include "app/ui/best_fit_criteria_selector.h"
 #include "app/ui/color_button.h"
 #include "app/ui/main_window.h"
 #include "app/ui/pref_widget.h"
@@ -44,8 +49,13 @@
 #include "render/render.h"
 #include "ui/ui.h"
 
+#if LAF_WINDOWS
+  #include "app/win/file_associations.h"
+  #include "app/win/thumbnails.h"
+#endif
+
 #if ENABLE_SENTRY
-#include "app/sentry_wrapper.h"
+  #include "app/sentry_wrapper.h"
 #endif
 
 #include "options.xml.h"
@@ -55,19 +65,18 @@ namespace app {
 namespace {
 
 const char* kSectionGeneralId = "section_general";
-const char* kSectionTabletId = "section_tablet";
 const char* kSectionBgId = "section_bg";
 const char* kSectionGridId = "section_grid";
 const char* kSectionThemeId = "section_theme";
 const char* kSectionExtensionsId = "section_extensions";
+const char* kSectionTabletId = "section_tablet";
+const char* kSectionFileExplorerId = "section_file_explorer";
 
 const char* kInfiniteSymbol = "\xE2\x88\x9E"; // Infinite symbol (UTF-8)
 
 app::gen::ColorProfileBehavior filesWithCsMap[] = {
-  app::gen::ColorProfileBehavior::DISABLE,
-  app::gen::ColorProfileBehavior::EMBEDDED,
-  app::gen::ColorProfileBehavior::CONVERT,
-  app::gen::ColorProfileBehavior::ASSIGN,
+  app::gen::ColorProfileBehavior::DISABLE, app::gen::ColorProfileBehavior::EMBEDDED,
+  app::gen::ColorProfileBehavior::CONVERT, app::gen::ColorProfileBehavior::ASSIGN,
   app::gen::ColorProfileBehavior::ASK,
 };
 
@@ -77,21 +86,63 @@ app::gen::ColorProfileBehavior missingCsMap[] = {
   app::gen::ColorProfileBehavior::ASK,
 };
 
+// This property generates a lower case version of the widget's text, and a space-separated lower
+// case list of words. It includes any tooltips attached to the widget and for ComboBoxes it
+// combines all of the item text. This helps the preference search not have to repeatedly do all of
+// these string operations when the user is typing.
+//
+// When the UI language changes, these properties are removed so they may be generated again.
+class SearchTextProperty : public ui::Property {
+public:
+  static constexpr const char* Name = "SearchText";
+
+  SearchTextProperty(ui::Widget* widget, ui::TooltipManager* tooltipManager) : ui::Property(Name)
+  {
+    m_text = widget->text();
+
+    if (widget->type() == ui::kComboBoxWidget) {
+      auto* comboBox = static_cast<ui::ComboBox*>(widget);
+
+      for (int i = 0; i < comboBox->getItemCount(); i++)
+        m_text += " " + comboBox->getItemText(i);
+
+      // Handle the special combobox tooltip case, where they're attached to the entry widget.
+      if (const auto& comboTooltip = tooltipManager->getTooltipFor(comboBox->getEntryWidget());
+          !comboTooltip.empty())
+        m_text += " " + comboTooltip;
+    }
+    else if (const auto& tooltip = tooltipManager->getTooltipFor(widget); !tooltip.empty())
+      m_text += " " + tooltip;
+
+    m_text = base::string_to_lower(m_text);
+
+    base::split_string(m_text, m_textWords, " ");
+  }
+
+  const std::string& text() const { return m_text; }
+
+  const std::vector<std::string>& textWords() const { return m_textWords; }
+
+private:
+  std::string m_text;
+  std::vector<std::string> m_textWords;
+};
+
 class ExtensionCategorySeparator : public SeparatorInView {
 public:
-  ExtensionCategorySeparator(const Extension::Category category,
-                             const std::string& text)
+  ExtensionCategorySeparator(const Extension::Category category, const std::string& text)
     : SeparatorInView(text, ui::HORIZONTAL)
-    , m_category(category) {
-    InitTheme.connect(
-      [this]{
-        auto b = this->border();
-        b.top(2*b.top());
-        b.bottom(2*b.bottom());
-        this->setBorder(b);
-      });
+    , m_category(category)
+  {
+    InitTheme.connect([this] {
+      auto b = this->border();
+      b.top(2 * b.top());
+      b.bottom(2 * b.bottom());
+      this->setBorder(b);
+    });
   }
   Extension::Category category() const { return m_category; }
+
 private:
   Extension::Category m_category;
 };
@@ -101,14 +152,11 @@ private:
 using namespace ui;
 
 class OptionsWindow : public app::gen::Options {
-
   class ColorSpaceItem : public ListItem {
   public:
-    ColorSpaceItem(const os::ColorSpaceRef& cs)
-      : ListItem(cs->gfxColorSpace()->name()),
-        m_cs(cs) {
-    }
+    ColorSpaceItem(const os::ColorSpaceRef& cs) : ListItem(cs->gfxColorSpace()->name()), m_cs(cs) {}
     os::ColorSpaceRef cs() const { return m_cs; }
+
   private:
     os::ColorSpaceRef m_cs;
   };
@@ -119,27 +167,25 @@ class OptionsWindow : public app::gen::Options {
               const std::string& path,
               const std::string& displayName = std::string(),
               const std::string& variant = std::string())
-      : ListItem(createLabel(path, id, displayName, variant)),
-        m_path(path),
-        m_name(id) {
+      : ListItem(createLabel(path, id, displayName, variant))
+      , m_path(path)
+      , m_name(id)
+    {
     }
 
     const std::string& themePath() const { return m_path; }
     const std::string& themeName() const { return m_name; }
 
-    void openFolder() const {
-      app::launcher::open_folder(m_path);
-    }
+    void openFolder() const { app::launcher::open_folder(m_path); }
 
-    bool canSelect() const {
-      return !m_name.empty();
-    }
+    bool canSelect() const { return !m_name.empty(); }
 
   private:
     static std::string createLabel(const std::string& path,
                                    const std::string& id,
                                    const std::string& displayName,
-                                   const std::string& variant) {
+                                   const std::string& variant)
+    {
       if (displayName.empty()) {
         if (id.empty())
           return fmt::format("-- {} --", path);
@@ -167,66 +213,72 @@ class OptionsWindow : public app::gen::Options {
   class LangItem : public ListItem {
   public:
     LangItem(const LangInfo& langInfo)
-      : ListItem(langInfo.displayName)
-      , m_langInfo(langInfo) {
+      : ListItem(fmt::format("{} ({})", langInfo.displayName, langInfo.id))
+      , m_langInfo(langInfo)
+    {
     }
-    const std::string& langId() const {
-      return m_langInfo.id;
-    }
+    const std::string& langId() const { return m_langInfo.id; }
+
   private:
     LangInfo m_langInfo;
   };
 
   class ExtensionItem : public ListItem {
   public:
-    ExtensionItem(Extension* extension)
-      : ListItem(extension->displayName())
-      , m_extension(extension) {
+    ExtensionItem(Extension* extension) : ListItem(extension->displayName()), m_extension(extension)
+    {
       setEnabled(extension->isEnabled());
     }
 
     Extension* extension() { return m_extension; }
 
-    Extension::Category category() const {
+    Extension::Category category() const
+    {
       ASSERT(m_extension);
       return m_extension->category();
     }
 
-    bool isEnabled() const {
+    bool isEnabled() const
+    {
       ASSERT(m_extension);
       return m_extension->isEnabled();
     }
 
-    bool isInstalled() const {
+    bool isInstalled() const
+    {
       ASSERT(m_extension);
       return m_extension->isInstalled();
     }
 
-    bool canBeDisabled() const {
+    bool canBeDisabled() const
+    {
       ASSERT(m_extension);
       return m_extension->canBeDisabled();
     }
 
-    bool canBeUninstalled() const {
+    bool canBeUninstalled() const
+    {
       ASSERT(m_extension);
       return m_extension->canBeUninstalled();
     }
 
-    void enable(bool state) {
+    void enable(bool state)
+    {
       ASSERT(m_extension);
       App::instance()->extensions().enableExtension(m_extension, state);
       setEnabled(m_extension->isEnabled());
     }
 
-    void uninstall() {
+    void uninstall()
+    {
       ASSERT(m_extension);
       ASSERT(canBeUninstalled());
-      App::instance()->extensions().uninstallExtension(m_extension,
-                                                       DeletePluginPref::kYes);
+      App::instance()->extensions().uninstallExtension(m_extension, DeletePluginPref::Yes);
       m_extension = nullptr;
     }
 
-    void openFolder() const {
+    void openFolder() const
+    {
       ASSERT(m_extension);
       app::launcher::open_folder(m_extension->path());
     }
@@ -237,15 +289,16 @@ class OptionsWindow : public app::gen::Options {
 
   class ThemeVariantItem : public ButtonSet::Item {
   public:
-    ThemeVariantItem(OptionsWindow* options,
-                     const std::string& id,
-                     const std::string& variant)
+    ThemeVariantItem(OptionsWindow* options, const std::string& id, const std::string& variant)
       : m_options(options)
-      , m_themeId(id) {
+      , m_themeId(id)
+    {
       setText(variant);
     }
+
   private:
-    void onClick() override {
+    void onClick() override
+    {
       m_options->setUITheme(m_themeId,
                             false,  // Don't adjust scale
                             false); // Don't recreate variants
@@ -256,7 +309,8 @@ class OptionsWindow : public app::gen::Options {
 
 public:
   OptionsWindow(Context* context, int& curSection)
-    : m_context(context)
+    : m_system(os::System::instance())
+    , m_context(context)
     , m_pref(Preferences::instance())
     , m_globPref(m_pref.document(nullptr))
     , m_docPref(m_pref.document(context->activeDocument()))
@@ -266,232 +320,83 @@ public:
     , m_restoreScreenScaling(m_pref.general.screenScale())
     , m_restoreUIScaling(m_pref.general.uiScale())
   {
-    sectionListbox()->Change.connect([this]{ onChangeSection(); });
+    sectionListbox()->Change.connect([this] { onChangeSection(); });
 
-    // Theme variants
+    // Theme variants/fonts.
     fillThemeVariants();
+    fillThemeFonts();
+    updateFontPreviews();
 
-    // Default extension to save files
-    fillExtensionsCombobox(defaultExtension(), m_pref.saveFile.defaultExtension());
-    fillExtensionsCombobox(exportImageDefaultExtension(), m_pref.exportFile.imageDefaultExtension());
-    fillExtensionsCombobox(exportAnimationDefaultExtension(), m_pref.exportFile.animationDefaultExtension());
-    fillExtensionsCombobox(exportSpriteSheetDefaultExtension(), m_pref.spriteSheet.defaultExtension());
+    // Language change
+    language()->Change.connect([this] { onLanguageChange(); });
+    fontWarning()->Click.connect([this] {
+      for (auto item : sectionListbox()->children()) {
+        if (static_cast<ListItem*>(item)->getValue() == kSectionThemeId) {
+          sectionListbox()->selectChild(item);
+          break;
+        }
+      }
+    });
 
-    // Number of recent items
-    recentFiles()->setValue(m_pref.general.recentItems());
-    clearRecentFiles()->Click.connect([this]{ onClearRecentFiles(); });
+    // Recent files
+    clearRecentFiles()->Click.connect([this] { onClearRecentFiles(); });
 
     // Template item for active display color profiles
     m_templateTextForDisplayCS = windowCs()->getItem(2)->text();
     windowCs()->deleteItem(2);
 
     // Color profiles
-    resetColorManagement()->Click.connect([this]{ onResetColorManagement(); });
-    colorManagement()->Click.connect([this]{ onColorManagement(); });
+    resetColorManagement()->Click.connect([this] { onResetColorManagement(); });
+    colorManagement()->Click.connect([this] { onColorManagement(); });
     {
-      os::instance()->listColorSpaces(m_colorSpaces);
+      m_system->listColorSpaces(m_colorSpaces);
       for (auto& cs : m_colorSpaces) {
         if (cs->gfxColorSpace()->type() != gfx::ColorSpace::None)
           workingRgbCs()->addItem(new ColorSpaceItem(cs));
       }
-      updateColorProfileControls(m_pref.color.manage(),
-                                 m_pref.color.windowProfile(),
-                                 m_pref.color.windowProfileName(),
-                                 m_pref.color.workingRgbSpace(),
-                                 m_pref.color.filesWithProfile(),
-                                 m_pref.color.missingProfile());
     }
 
     // Alerts
-    openSequence()->setSelectedItemIndex(int(m_pref.openFile.openSequence()));
-    resetAlerts()->Click.connect([this]{ onResetAlerts(); });
+    resetAlerts()->Click.connect([this] { onResetAlerts(); });
 
     // Cursor
-    paintingCursorType()->setSelectedItemIndex(int(m_pref.cursor.paintingCursorType()));
-    cursorColor()->setColor(m_pref.cursor.cursorColor());
+    cursorColorType()->Change.connect([this] { onCursorColorType(); });
+    nativeCursor()->Click.connect([this] { onNativeCursorChange(); });
 
-    if (cursorColor()->getColor().getType() == app::Color::MaskType) {
-      cursorColorType()->setSelectedItemIndex(0);
-      cursorColor()->setVisible(false);
-    }
-    else {
-      cursorColorType()->setSelectedItemIndex(1);
-      cursorColor()->setVisible(true);
-    }
-    cursorColorType()->Change.connect([this]{ onCursorColorType(); });
+    // Dialogs
+    showAsepriteFileDialog()->Click.connect(
+      [this] { nativeFileDialog()->setSelected(!showAsepriteFileDialog()->isSelected()); });
+    nativeFileDialog()->Click.connect(
+      [this] { showAsepriteFileDialog()->setSelected(!nativeFileDialog()->isSelected()); });
 
-    // Brush preview
-    brushPreview()->setSelectedItemIndex(
-      (int)m_pref.cursor.brushPreview());
-
-    // Guide colors
-    layerEdgesColor()->setColor(m_pref.guides.layerEdgesColor());
-    autoGuidesColor()->setColor(m_pref.guides.autoGuidesColor());
-
-    // Slices default color
-    defaultSliceColor()->setColor(m_pref.slices.defaultColor());
+    // Grid
+    gridW()->Leave.connect([this] {
+      // Prevent entering a width lesser than 1
+      if (gridW()->textInt() <= 0)
+        gridW()->setText("1");
+    });
+    gridH()->Leave.connect([this] {
+      // Prevent entering a height lesser than 1
+      if (gridH()->textInt() <= 0)
+        gridH()->setText("1");
+    });
 
     // Timeline
-    firstFrame()->setTextf("%d", m_globPref.timeline.firstFrame());
-    resetTimelineSel()->Click.connect([this]{ onResetTimelineSel(); });
+    resetTimelineSel()->Click.connect([this] { onResetTimelineSel(); });
 
     // Others
-    if (m_pref.general.expandMenubarOnMouseover())
-      expandMenubarOnMouseover()->setSelected(true);
-
-    if (m_pref.general.dataRecovery())
-      enableDataRecovery()->setSelected(true);
-    enableDataRecovery()->Click.connect(
-      [this](){
-        const bool state = enableDataRecovery()->isSelected();
-        keepEditedSpriteData()->setEnabled(state);
-        keepEditedSpriteData()->setSelected(state);
-        keepEditedSpriteDataFor()->setEnabled(state);
-      });
-
-    if (m_pref.general.dataRecovery() &&
-        m_pref.general.keepEditedSpriteData())
-      keepEditedSpriteData()->setSelected(true);
-    else if (!m_pref.general.dataRecovery()) {
-      keepEditedSpriteData()->setEnabled(false);
-      keepEditedSpriteDataFor()->setEnabled(false);
-    }
-
-    if (m_pref.general.keepClosedSpriteOnMemory())
-      keepClosedSpriteOnMemory()->setSelected(true);
-
-    if (m_pref.general.showFullPath())
-      showFullPath()->setSelected(true);
-
-    dataRecoveryPeriod()->setSelectedItemIndex(
-      dataRecoveryPeriod()->findItemIndexByValue(
-        base::convert_to<std::string>(m_pref.general.dataRecoveryPeriod())));
-
-    keepEditedSpriteDataFor()->setSelectedItemIndex(
-      keepEditedSpriteDataFor()->findItemIndexByValue(
-        base::convert_to<std::string>(m_pref.general.keepEditedSpriteDataFor())));
-
-    keepClosedSpriteOnMemoryFor()->setSelectedItemIndex(
-      keepClosedSpriteOnMemoryFor()->findItemIndexByValue(
-        base::convert_to<std::string>(m_pref.general.keepClosedSpriteOnMemoryFor())));
-
-    if (m_pref.editor.zoomFromCenterWithWheel())
-      zoomFromCenterWithWheel()->setSelected(true);
-
-    if (m_pref.editor.zoomFromCenterWithKeys())
-      zoomFromCenterWithKeys()->setSelected(true);
-
-    if (m_pref.selection.autoOpaque())
-      autoOpaque()->setSelected(true);
-
-    if (m_pref.selection.keepSelectionAfterClear())
-      keepSelectionAfterClear()->setSelected(true);
-
-    if (m_pref.selection.autoShowSelectionEdges())
-      autoShowSelectionEdges()->setSelected(true);
-
-    if (m_pref.selection.moveEdges())
-      moveEdges()->setSelected(true);
-
-    if (m_pref.selection.modifiersDisableHandles())
-      modifiersDisableHandles()->setSelected(true);
-
-    if (m_pref.selection.moveOnAddMode())
-      moveOnAddMode()->setSelected(true);
-
-    // If the platform supports native cursors...
-    if ((int(os::instance()->capabilities()) &
-         int(os::Capabilities::CustomMouseCursor)) != 0) {
-      if (m_pref.cursor.useNativeCursor())
-        nativeCursor()->setSelected(true);
-      nativeCursor()->Click.connect([this]{ onNativeCursorChange(); });
-
-      cursorScale()->setSelectedItemIndex(
-        cursorScale()->findItemIndexByValue(
-          base::convert_to<std::string>(m_pref.cursor.cursorScale())));
-    }
-    else {
-      nativeCursor()->setEnabled(false);
-    }
-
-    onNativeCursorChange();
-
-    // "Show Aseprite file dialog" option is the inverse of the old
-    // experimental "use native file dialog" option
-    showAsepriteFileDialog()->setSelected(
-      !m_pref.experimental.useNativeFileDialog());
-    showAsepriteFileDialog()->Click.connect([this]{
-      nativeFileDialog()->setSelected(
-        !showAsepriteFileDialog()->isSelected());
+    enableDataRecovery()->Click.connect([this]() {
+      const bool state = enableDataRecovery()->isSelected();
+      keepEditedSpriteData()->setEnabled(state);
+      keepEditedSpriteData()->setSelected(state);
+      keepEditedSpriteDataFor()->setEnabled(state);
     });
-    nativeFileDialog()->Click.connect([this]{
-      showAsepriteFileDialog()->setSelected(
-        !nativeFileDialog()->isSelected());
-    });
-
-#ifdef _WIN32 // Show Tablet section on Windows
-    {
-      os::TabletAPI tabletAPI = os::instance()->tabletAPI();
-
-      if (tabletAPI == os::TabletAPI::Wintab) {
-        tabletApiWintabSystem()->setSelected(true);
-        loadWintabDriver()->setSelected(true);
-        loadWintabDriver2()->setSelected(true);
-      }
-      else if (tabletAPI == os::TabletAPI::WintabPackets) {
-        tabletApiWintabDirect()->setSelected(true);
-        loadWintabDriver()->setSelected(true);
-        loadWintabDriver2()->setSelected(true);
-      }
-      else {
-        tabletApiWindowsPointer()->setSelected(true);
-        loadWintabDriver()->setSelected(false);
-        loadWintabDriver2()->setSelected(false);
-      }
-
-      tabletApiWindowsPointer()->Click.connect([this](){ onTabletAPIChange(); });
-      tabletApiWintabSystem()->Click.connect([this](){ onTabletAPIChange(); });
-      tabletApiWintabDirect()->Click.connect([this](){ onTabletAPIChange(); });
-      loadWintabDriver()->Click.connect(
-        [this](){ onLoadWintabChange(loadWintabDriver()->isSelected()); });
-      loadWintabDriver2()->Click.connect(
-        [this](){ onLoadWintabChange(loadWintabDriver2()->isSelected()); });
-    }
-#else  // For macOS and Linux
-    {
-      // Hide the "section_tablet" item (which is only for Windows at the moment)
-      for (auto item : sectionListbox()->children()) {
-        if (static_cast<ListItem*>(item)->getValue() == kSectionTabletId) {
-          item->setVisible(false);
-          break;
-        }
-      }
-      sectionTablet()->setVisible(false);
-      loadWintabDriverBox()->setVisible(false);
-      loadWintabDriverBox()->setVisible(false);
-    }
-#endif
-
-    if (m_pref.experimental.flashLayer())
-      flashLayer()->setSelected(true);
-
-    nonactiveLayersOpacity()->setValue(m_pref.experimental.nonactiveLayersOpacity());
 
     rgbmapAlgorithmPlaceholder()->addChild(&m_rgbmapAlgorithmSelector);
     m_rgbmapAlgorithmSelector.setExpansive(true);
-    m_rgbmapAlgorithmSelector.algorithm(m_pref.quantization.rgbmapAlgorithm());
 
-    if (m_pref.editor.showScrollbars())
-      showScrollbars()->setSelected(true);
-
-    if (m_pref.editor.autoScroll())
-      autoScroll()->setSelected(true);
-
-    if (m_pref.editor.straightLinePreview())
-      straightLinePreview()->setSelected(true);
-
-    if (m_pref.eyedropper.discardBrush())
-      discardBrush()->setSelected(true);
+    bestFitCriteriaPlaceholder()->addChild(&m_bestFitCriteriaSelector);
+    m_bestFitCriteriaSelector.setExpansive(true);
 
     // Scope
     bgScope()->addItem(Strings::options_bg_for_new_docs());
@@ -499,32 +404,21 @@ public:
     if (context->activeDocument()) {
       bgScope()->addItem(Strings::options_bg_for_active_doc());
       bgScope()->setSelectedItemIndex(1);
-      bgScope()->Change.connect([this]{ onChangeBgScope(); });
+      bgScope()->Change.connect([this] { onChangeBgScope(); });
 
       gridScope()->addItem(Strings::options_grid_for_active_doc());
       gridScope()->setSelectedItemIndex(1);
-      gridScope()->Change.connect([this]{ onChangeGridScope(); });
+      gridScope()->Change.connect([this] { onChangeGridScope(); });
     }
 
-    // Update the one/multiple window buttonset (and keep in on sync
-    // with the old/experimental checkbox)
-    uiWindows()->setSelectedItem(multipleWindows()->isSelected() ? 1: 0);
-    uiWindows()->ItemChange.connect([this]() {
-      multipleWindows()->setSelected(uiWindows()->selectedItem() == 1);
-    });
-    multipleWindows()->Click.connect([this](){
-      uiWindows()->setSelectedItem(multipleWindows()->isSelected() ? 1: 0);
-    });
-
-    // Scaling
-    selectScalingItems();
+    uiWindows()->ItemChange.connect(
+      [this]() { multipleWindows()->setSelected(uiWindows()->selectedItem() == 1); });
+    multipleWindows()->Click.connect(
+      [this]() { uiWindows()->setSelectedItem(multipleWindows()->isSelected() ? 1 : 0); });
 
 #ifdef ENABLE_DEVMODE // TODO enable this on Release when Aseprite supports
                       //      GPU-acceleration properly
-    if (os::instance()->hasCapability(os::Capabilities::GpuAccelerationSwitch)) {
-      gpuAcceleration()->setSelected(m_pref.general.gpuAcceleration());
-    }
-    else
+    if (!m_system->hasCapability(os::Capabilities::GpuAccelerationSwitch))
 #endif
     {
       gpuAcceleration()->setVisible(false);
@@ -532,23 +426,16 @@ public:
 
     // If the platform does support native menus, we show the option,
     // in other case, the option doesn't make sense for this platform.
-    if (os::instance()->menus())
-      showMenuBar()->setSelected(m_pref.general.showMenuBar());
-    else
+    if (!m_system->menus())
       showMenuBar()->setVisible(false);
-
-    showHome()->setSelected(m_pref.general.showHome());
 
     // Editor sampling
     samplingPlaceholder()->addChild(
-      m_samplingSelector = new SamplingSelector(
-        SamplingSelector::Behavior::ChangeOnSave));
+      m_samplingSelector = new SamplingSelector(SamplingSelector::Behavior::ChangeOnSave));
 
     m_samplingSelector->setEnabled(newRenderEngine()->isSelected());
     newRenderEngine()->Click.connect(
-      [this]{
-        m_samplingSelector->setEnabled(newRenderEngine()->isSelected());
-      });
+      [this] { m_samplingSelector->setEnabled(newRenderEngine()->isSelected()); });
 
     // Right-click
     static_assert(int(app::gen::RightClickMode::PAINT_BGCOLOR) == 0, "");
@@ -566,7 +453,6 @@ public:
     rightClickBehavior()->addItem(Strings::options_right_click_rectangular_marquee());
     rightClickBehavior()->addItem(Strings::options_right_click_lasso());
     rightClickBehavior()->addItem(Strings::options_right_click_select_layer_and_move());
-    rightClickBehavior()->setSelectedItemIndex((int)m_pref.editor.rightClickMode());
 
 #ifndef __APPLE__ // Zoom sliding two fingers option only on macOS
     slideZoom()->setVisible(false);
@@ -582,16 +468,16 @@ public:
     checkeredBgSize()->addItem("2x2");
     checkeredBgSize()->addItem("1x1");
     checkeredBgSize()->addItem(Strings::options_bg_custom_size());
-    checkeredBgSize()->Change.connect([this]{ onCheckeredBgSizeChange(); });
+    checkeredBgSize()->Change.connect([this] { onCheckeredBgSizeChange(); });
 
     // Reset buttons
-    resetBg()->Click.connect([this]{ onResetBg(); });
-    resetGrid()->Click.connect([this]{ onResetGrid(); });
+    resetBg()->Click.connect([this] { onResetBg(); });
+    resetGrid()->Click.connect([this] { onResetGrid(); });
 
     // Links
-    locateFile()->Click.connect([this]{ onLocateConfigFile(); });
+    locateFile()->Click.connect([this] { onLocateConfigFile(); });
     if (!App::instance()->memoryDumpFilename().empty())
-      locateCrashFolder()->Click.connect([this]{ onLocateCrashFolder(); });
+      locateCrashFolder()->Click.connect([this] { onLocateCrashFolder(); });
     else
       locateCrashFolder()->setVisible(false);
 
@@ -603,51 +489,312 @@ public:
 #endif
 
     // Undo preferences
-    limitUndo()->Click.connect([this]{ onLimitUndoCheck(); });
+    limitUndo()->Click.connect([this] { onLimitUndoCheck(); });
+
+    // Theme Custom Font
+    customThemeFont()->Click.connect([this] {
+      auto* theme = skin::SkinTheme::get(this);
+      onSwitchCustomFontCheckBox(customThemeFont(), themeFont(), theme->getDefaultFontInfo());
+    });
+    customMiniFont()->Click.connect([this] {
+      auto* theme = skin::SkinTheme::get(this);
+      onSwitchCustomFontCheckBox(customMiniFont(), themeMiniFont(), theme->getMiniFontInfo());
+    });
+    themeFont()->FontChange.connect([this] { updateFontPreviews(); });
+    themeMiniFont()->FontChange.connect([this] { updateFontPreviews(); });
+
+    // Theme buttons
+    themeList()->Change.connect([this] { onThemeChange(); });
+    themeList()->DoubleClickItem.connect([this] { onSelectTheme(); });
+    selectTheme()->Click.connect([this] { onSelectTheme(); });
+    openThemeFolder()->Click.connect([this] { onOpenThemeFolder(); });
+
+    // Extensions buttons
+    extensionsList()->Change.connect([this] { onExtensionChange(); });
+    addExtension()->Click.connect([this] { onAddExtension(); });
+    disableExtension()->Click.connect([this] { onDisableExtension(); });
+    uninstallExtension()->Click.connect([this] { onUninstallExtension(); });
+    openExtensionFolder()->Click.connect([this] { onOpenExtensionFolder(); });
+
+    // Aseprite Format preferences
+    celFormat()->Change.connect([this] { onCelFormatChange(); });
+
+#if LAF_WINDOWS
+    // Show Tablet section on Windows
+    tabletApiWindowsPointer()->Click.connect([this] { onTabletAPIChange(); });
+    tabletApiWintabSystem()->Click.connect([this] { onTabletAPIChange(); });
+    tabletApiWintabDirect()->Click.connect([this] { onTabletAPIChange(); });
+
+    // File Explorer preferences
+    std::string dll_name = win::get_thumbnailer_dll();
+    if (dll_name.empty()) {
+      winDisplayThumbnail()->setEnabled(false);
+      winDisplayThumbnail()->setText(
+        Strings::options_thumbnailer_dll_not_found(win::kAsepriteThumbnailerDllName));
+      winDisplayLittleIcon()->setVisible(false);
+    }
+    else {
+      win::ThumbnailsOption opts = windowsFileExplorerThumbnailsOptionsFromRegistry();
+      winDisplayThumbnail()->setSelected(opts.enabled);
+      winDisplayLittleIcon()->setVisible(opts.enabled);
+      winDisplayLittleIcon()->setSelected(opts.overlay);
+      winDisplayThumbnail()->Click.connect([this] {
+        winDisplayLittleIcon()->setVisible(winDisplayThumbnail()->isSelected());
+        checkIfExplorerProcNeedsRestart();
+      });
+      winDisplayLittleIcon()->Click.connect([this] { checkIfExplorerProcNeedsRestart(); });
+    }
+    // File Explorer file type associations
+    fillExtensionsCombobox(winFileTypeToAssociate(), "aseprite");
+    winAssociateFileType()->Click.connect([this] { onAssociateFileType(); });
+#else // For macOS and Linux
+    {
+      // Hide the "section_tablet" and "section_file_explorer" items
+      // which are only for Windows at the moment.
+      for (auto item : sectionListbox()->children()) {
+        if (auto* listItem = dynamic_cast<ListItem*>(item)) {
+          if (listItem->getValue() == kSectionTabletId ||
+              listItem->getValue() == kSectionFileExplorerId) {
+            listItem->setVisible(false);
+          }
+        }
+      }
+      sectionWindowsSpecificSeparator()->setVisible(false);
+      sectionTablet()->setVisible(false);
+      sectionFileExplorer()->setVisible(false);
+    }
+#endif
+
+    // Reset checkboxes
+
+    // Prevent the user from clicking "Reset" if they don't have anything selected.
+    auto validateYesButton = [this] {
+      resetSelectedButton()->setEnabled(
+        defaultReset()->isSelected() || installedReset()->isSelected() ||
+        recentReset()->isSelected() || perfileReset()->isSelected() ||
+        windowReset()->isSelected() || toolsReset()->isSelected() || brushesReset()->isSelected());
+
+      resetToggle()->setSelected(defaultReset()->isSelected() && installedReset()->isSelected() &&
+                                 recentReset()->isSelected() && perfileReset()->isSelected() &&
+                                 windowReset()->isSelected() && toolsReset()->isSelected() &&
+                                 brushesReset()->isSelected());
+    };
+
+    defaultReset()->Click.connect(validateYesButton);
+    installedReset()->Click.connect(validateYesButton);
+    recentReset()->Click.connect(validateYesButton);
+    perfileReset()->Click.connect(validateYesButton);
+    toolsReset()->Click.connect(validateYesButton);
+    windowReset()->Click.connect(validateYesButton);
+    brushesReset()->Click.connect(validateYesButton);
+    resetSelectedButton()->Click.connect([this] { onResetDefault(); });
+    resetToggle()->Click.connect([this, validateYesButton] {
+      bool toggle = resetToggle()->isSelected();
+      defaultReset()->setSelected(toggle);
+      installedReset()->setSelected(toggle);
+      recentReset()->setSelected(toggle);
+      perfileReset()->setSelected(toggle);
+      toolsReset()->setSelected(toggle);
+      windowReset()->setSelected(toggle);
+      brushesReset()->setSelected(toggle);
+      validateYesButton();
+    });
+
+    defaultReset()->setSelected(true);
+
+    // Apply button
+    buttonApply()->Click.connect([this] { onApply(); });
+
+    // Refill languages combobox when extensions are enabled/disabled
+    m_extLanguagesChanges = App::instance()->extensions().LanguagesChange.connect(
+      [this] { refillLanguages(); });
+
+    // Reload themes when extensions are enabled/disabled
+    m_extThemesChanges = App::instance()->extensions().ThemesChange.connect(
+      [this] { reloadThemes(); });
+
+    search()->Change.connect(&OptionsWindow::onSearch, this);
+
+    loadFromPreferences();
+
+    manager()->addMessageFilter(kFocusEnterMessage, this);
+  }
+
+  ~OptionsWindow() { manager()->removeMessageFilter(kFocusEnterMessage, this); }
+
+  void loadFromPreferences()
+  {
+    // Default extension to save files
+    fillExtensionsCombobox(defaultExtension(), m_pref.saveFile.defaultExtension());
+    fillExtensionsCombobox(exportImageDefaultExtension(),
+                           m_pref.exportFile.imageDefaultExtension());
+    fillExtensionsCombobox(exportAnimationDefaultExtension(),
+                           m_pref.exportFile.animationDefaultExtension());
+    fillExtensionsCombobox(exportSpriteSheetDefaultExtension(),
+                           m_pref.spriteSheet.defaultExtension());
+
+    // Number of recent items
+    recentFiles()->setValue(m_pref.general.recentItems());
+
+    // Color profiles
+    updateColorProfileControls(m_pref.color.manage(),
+                               m_pref.color.windowProfile(),
+                               m_pref.color.windowProfileName(),
+                               m_pref.color.workingRgbSpace(),
+                               m_pref.color.filesWithProfile(),
+                               m_pref.color.missingProfile());
+
+    // Alerts
+    openSequence()->setSelectedItemIndex(int(m_pref.openFile.openSequence()));
+
+    // Cursor
+    paintingCursorType()->setSelectedItemIndex(int(m_pref.cursor.paintingCursorType()));
+    cursorColor()->setColor(m_pref.cursor.cursorColor());
+
+    if (cursorColor()->getColor().getType() == app::Color::MaskType) {
+      cursorColorType()->setSelectedItemIndex(0);
+      cursorColor()->setVisible(false);
+    }
+    else {
+      cursorColorType()->setSelectedItemIndex(1);
+      cursorColor()->setVisible(true);
+    }
+
+    // Brush preview
+    brushPreview()->setSelectedItemIndex((int)m_pref.cursor.brushPreview());
+
+    // Guide colors
+    layerEdgesColor()->setColor(m_pref.guides.layerEdgesColor());
+    autoGuidesColor()->setColor(m_pref.guides.autoGuidesColor());
+
+    // Slices default color
+    defaultSliceColor()->setColor(m_pref.slices.defaultColor());
+
+    // Tooltip Delay
+    tooltipDelay()->setTextf("%d", m_pref.experimental.tooltipDelay());
+
+    // Timeline
+    firstFrame()->setTextf("%d", m_globPref.timeline.firstFrame());
+
+    // Others
+    expandMenubarOnMouseover()->setSelected(m_pref.general.expandMenubarOnMouseover());
+
+    enableDataRecovery()->setSelected(m_pref.general.dataRecovery());
+
+    if (m_pref.general.dataRecovery() && m_pref.general.keepEditedSpriteData())
+      keepEditedSpriteData()->setSelected(true);
+    else if (!m_pref.general.dataRecovery()) {
+      keepEditedSpriteData()->setEnabled(false);
+      keepEditedSpriteDataFor()->setEnabled(false);
+    }
+
+    keepClosedSpriteOnMemory()->setSelected(m_pref.general.keepClosedSpriteOnMemory());
+    showFullPath()->setSelected(m_pref.general.showFullPath());
+
+    dataRecoveryPeriod()->setSelectedItemIndex(dataRecoveryPeriod()->findItemIndexByValue(
+      base::convert_to<std::string>(m_pref.general.dataRecoveryPeriod())));
+
+    keepEditedSpriteDataFor()->setSelectedItemIndex(keepEditedSpriteDataFor()->findItemIndexByValue(
+      base::convert_to<std::string>(m_pref.general.keepEditedSpriteDataFor())));
+
+    keepClosedSpriteOnMemoryFor()->setSelectedItemIndex(
+      keepClosedSpriteOnMemoryFor()->findItemIndexByValue(
+        base::convert_to<std::string>(m_pref.general.keepClosedSpriteOnMemoryFor())));
+
+    zoomFromCenterWithWheel()->setSelected(m_pref.editor.zoomFromCenterWithWheel());
+    zoomFromCenterWithKeys()->setSelected(m_pref.editor.zoomFromCenterWithKeys());
+    autoOpaque()->setSelected(m_pref.selection.autoOpaque());
+    keepSelectionAfterClear()->setSelected(m_pref.selection.keepSelectionAfterClear());
+    autoShowSelectionEdges()->setSelected(m_pref.selection.autoShowSelectionEdges());
+    moveEdges()->setSelected(m_pref.selection.moveEdges());
+    modifiersDisableHandles()->setSelected(m_pref.selection.modifiersDisableHandles());
+    moveOnAddMode()->setSelected(m_pref.selection.moveOnAddMode());
+
+    // If the platform supports native cursors...
+    if ((int(m_system->capabilities()) & int(os::Capabilities::CustomMouseCursor)) != 0) {
+      nativeCursor()->setSelected(m_pref.cursor.useNativeCursor());
+
+      cursorScale()->setSelectedItemIndex(cursorScale()->findItemIndexByValue(
+        base::convert_to<std::string>(m_pref.cursor.cursorScale())));
+    }
+    else {
+      nativeCursor()->setEnabled(false);
+    }
+
+    onNativeCursorChange();
+
+    // "Show Aseprite file dialog" option is the inverse of the old
+    // experimental "use native file dialog" option
+    showAsepriteFileDialog()->setSelected(!m_pref.experimental.useNativeFileDialog());
+
+#if LAF_WINDOWS // Show Tablet section on Windows
+    {
+      const os::TabletAPI tabletAPI = m_system->tabletOptions().api;
+      if (tabletAPI == os::TabletAPI::Wintab)
+        tabletApiWintabSystem()->setSelected(true);
+      else if (tabletAPI == os::TabletAPI::WintabPackets)
+        tabletApiWintabDirect()->setSelected(true);
+      else
+        tabletApiWindowsPointer()->setSelected(true);
+
+      onTabletAPIChange();
+    }
+#endif
+
+    useSelectionToolLoop()->setSelected(m_pref.experimental.useSelectionToolLoop());
+    flashLayer()->setSelected(m_pref.experimental.flashLayer());
+    nonactiveLayersOpacity()->setValue(m_pref.experimental.nonactiveLayersOpacity());
+
+    m_rgbmapAlgorithmSelector.algorithm(m_pref.quantization.rgbmapAlgorithm());
+    m_bestFitCriteriaSelector.criteria(m_pref.quantization.fitCriteria());
+
+    showScrollbars()->setSelected(m_pref.editor.showScrollbars());
+    autoScroll()->setSelected(m_pref.editor.autoScroll());
+    straightLinePreview()->setSelected(m_pref.editor.straightLinePreview());
+    discardBrush()->setSelected(m_pref.eyedropper.discardBrush());
+
+    // Update the one/multiple window buttonset (and keep in on sync
+    // with the old/experimental checkbox)
+    uiWindows()->setSelectedItem(multipleWindows()->isSelected() ? 1 : 0);
+
+    // Scaling
+    selectScalingItems();
+
+#ifdef ENABLE_DEVMODE
+    if (m_system->hasCapability(os::Capabilities::GpuAccelerationSwitch)) {
+      gpuAcceleration()->setSelected(m_pref.general.gpuAcceleration());
+    }
+#endif
+
+    if (m_system->menus())
+      showMenuBar()->setSelected(m_pref.general.showMenuBar());
+
+    showHome()->setSelected(m_pref.general.showHome());
+
+    // Right-click
+    rightClickBehavior()->setSelectedItemIndex((int)m_pref.editor.rightClickMode());
+
+    // Undo preferences
     limitUndo()->setSelected(m_pref.undo.sizeLimit() != 0);
     onLimitUndoCheck();
 
     undoGotoModified()->setSelected(m_pref.undo.gotoModified());
     undoAllowNonlinearHistory()->setSelected(m_pref.undo.allowNonlinearHistory());
 
-    // Theme buttons
-    themeList()->Change.connect([this]{ onThemeChange(); });
-    themeList()->DoubleClickItem.connect([this]{ onSelectTheme(); });
-    selectTheme()->Click.connect([this]{ onSelectTheme(); });
-    openThemeFolder()->Click.connect([this]{ onOpenThemeFolder(); });
-
-    // Extensions buttons
-    extensionsList()->Change.connect([this]{ onExtensionChange(); });
-    addExtension()->Click.connect([this]{ onAddExtension(); });
-    disableExtension()->Click.connect([this]{ onDisableExtension(); });
-    uninstallExtension()->Click.connect([this]{ onUninstallExtension(); });
-    openExtensionFolder()->Click.connect([this]{ onOpenExtensionFolder(); });
-
-    // Apply button
-    buttonApply()->Click.connect([this]{ onApply(); });
-
     onChangeBgScope();
     onChangeGridScope();
-    sectionListbox()->selectIndex(m_curSection);
 
-    // Refill languages combobox when extensions are enabled/disabled
-    m_extLanguagesChanges =
-      App::instance()->extensions().LanguagesChange.connect(
-        [this]{ refillLanguages(); });
-
-    // Reload themes when extensions are enabled/disabled
-    m_extThemesChanges =
-      App::instance()->extensions().ThemesChange.connect(
-        [this]{ reloadThemes(); });
+    // Aseprite format preferences
+    celFormat()->setSelectedItemIndex(int(m_pref.asepriteFormat.celFormat()));
+    onCelFormatChange();
   }
 
-  bool ok() {
-    return (closer() == buttonOk());
-  }
+  bool ok() { return (closer() == buttonOk()); }
 
-  void saveConfig() {
+  void saveConfig(bool propagate = true)
+  {
     // Save preferences in widgets that are bound to options automatically
-    {
+    if (propagate) {
       Message msg(kSavePreferencesMessage);
       msg.setPropagateToChildren(true);
       sendMessage(&msg);
@@ -700,7 +847,8 @@ public:
       m_pref.general.keepEditedSpriteData(keepEditedSpriteData()->isSelected());
       m_pref.general.keepEditedSpriteDataFor(newLifespan);
 
-      warnings += "<<- " + Strings::alerts_restart_by_preferences_keep_edited_sprite_data_lifespan();
+      warnings += "<<- " +
+                  Strings::alerts_restart_by_preferences_keep_edited_sprite_data_lifespan();
     }
 
     double newKeepClosed = base::convert_to<double>(keepClosedSpriteOnMemoryFor()->getValue());
@@ -709,7 +857,8 @@ public:
       m_pref.general.keepClosedSpriteOnMemory(keepClosedSpriteOnMemory()->isSelected());
       m_pref.general.keepClosedSpriteOnMemoryFor(newKeepClosed);
 
-      warnings += "<<- " + Strings::alerts_restart_by_preferences_keep_closed_sprite_on_memory_for();
+      warnings += "<<- " +
+                  Strings::alerts_restart_by_preferences_keep_closed_sprite_on_memory_for();
     }
 
     m_pref.editor.zoomFromCenterWithWheel(zoomFromCenterWithWheel()->isSelected());
@@ -718,12 +867,15 @@ public:
     m_pref.editor.autoScroll(autoScroll()->isSelected());
     m_pref.editor.straightLinePreview(straightLinePreview()->isSelected());
     m_pref.eyedropper.discardBrush(discardBrush()->isSelected());
-    m_pref.editor.rightClickMode(static_cast<app::gen::RightClickMode>(rightClickBehavior()->getSelectedItemIndex()));
+    m_pref.editor.rightClickMode(
+      static_cast<app::gen::RightClickMode>(rightClickBehavior()->getSelectedItemIndex()));
     if (m_samplingSelector)
       m_samplingSelector->save();
-    m_pref.cursor.paintingCursorType(static_cast<app::gen::PaintingCursorType>(paintingCursorType()->getSelectedItemIndex()));
+    m_pref.cursor.paintingCursorType(
+      static_cast<app::gen::PaintingCursorType>(paintingCursorType()->getSelectedItemIndex()));
     m_pref.cursor.cursorColor(cursorColor()->getColor());
-    m_pref.cursor.brushPreview(static_cast<app::gen::BrushPreview>(brushPreview()->getSelectedItemIndex()));
+    m_pref.cursor.brushPreview(
+      static_cast<app::gen::BrushPreview>(brushPreview()->getSelectedItemIndex()));
     m_pref.cursor.useNativeCursor(nativeCursor()->isSelected());
     m_pref.cursor.cursorScale(base::convert_to<int>(cursorScale()->getValue()));
     m_pref.selection.autoOpaque(autoOpaque()->isSelected());
@@ -737,21 +889,14 @@ public:
     m_pref.slices.defaultColor(defaultSliceColor()->getColor());
 
     m_pref.color.workingRgbSpace(
-      workingRgbCs()->getItemText(
-        workingRgbCs()->getSelectedItemIndex()));
-    m_pref.color.filesWithProfile(
-      filesWithCsMap[filesWithCs()->getSelectedItemIndex()]);
-    m_pref.color.missingProfile(
-      missingCsMap[missingCs()->getSelectedItemIndex()]);
+      workingRgbCs()->getItemText(workingRgbCs()->getSelectedItemIndex()));
+    m_pref.color.filesWithProfile(filesWithCsMap[filesWithCs()->getSelectedItemIndex()]);
+    m_pref.color.missingProfile(missingCsMap[missingCs()->getSelectedItemIndex()]);
 
     int winCs = windowCs()->getSelectedItemIndex();
     switch (winCs) {
-      case 0:
-        m_pref.color.windowProfile(gen::WindowColorProfile::MONITOR);
-        break;
-      case 1:
-        m_pref.color.windowProfile(gen::WindowColorProfile::SRGB);
-        break;
+      case 0:  m_pref.color.windowProfile(gen::WindowColorProfile::MONITOR); break;
+      case 1:  m_pref.color.windowProfile(gen::WindowColorProfile::SRGB); break;
       default: {
         m_pref.color.windowProfile(gen::WindowColorProfile::SPECIFIC);
 
@@ -759,7 +904,7 @@ public:
         int j = 2;
         for (auto& cs : m_colorSpaces) {
           // We add ICC profiles only
-          auto gfxCs = cs->gfxColorSpace();
+          auto& gfxCs = cs->gfxColorSpace();
           if (gfxCs->type() != gfx::ColorSpace::ICC)
             continue;
 
@@ -780,9 +925,7 @@ public:
     m_pref.range.opacity(static_cast<app::gen::AlphaRange>(opacity()->getSelectedItemIndex()));
 
     // Change sprite grid bounds
-    if (m_context &&
-        m_context->activeDocument() &&
-        m_context->activeDocument()->sprite() &&
+    if (m_context && m_context->activeDocument() && m_context->activeDocument()->sprite() &&
         m_context->activeDocument()->sprite()->gridBounds() != gridBounds()) {
       try {
         ContextWriter writer(m_context, 1000);
@@ -808,9 +951,8 @@ public:
 
     m_curPref->bg.type(app::gen::BgType(checkeredBgSize()->getSelectedItemIndex()));
     if (m_curPref->bg.type() == app::gen::BgType::CHECKERED_CUSTOM) {
-      m_curPref->bg.size(gfx::Size(
-        checkeredBgCustomW()->textInt(),
-        checkeredBgCustomH()->textInt()));
+      m_curPref->bg.size(
+        gfx::Size(checkeredBgCustomW()->textInt(), checkeredBgCustomH()->textInt()));
     }
     m_curPref->bg.zoom(checkeredBgZoom()->isSelected());
     m_curPref->bg.color1(checkeredBgColor1()->getColor());
@@ -827,12 +969,19 @@ public:
     m_pref.undo.gotoModified(undoGotoModified()->isSelected());
     m_pref.undo.allowNonlinearHistory(undoAllowNonlinearHistory()->isSelected());
 
+    // Aseprite format preferences
+    m_pref.asepriteFormat.celFormat(gen::CelContentFormat(celFormat()->getSelectedItemIndex()));
+
     // Experimental features
+    m_pref.experimental.useSelectionToolLoop(useSelectionToolLoop()->isSelected());
     m_pref.experimental.flashLayer(flashLayer()->isSelected());
     m_pref.experimental.nonactiveLayersOpacity(nonactiveLayersOpacity()->getValue());
     m_pref.quantization.rgbmapAlgorithm(m_rgbmapAlgorithmSelector.algorithm());
+    m_pref.quantization.fitCriteria(m_bestFitCriteriaSelector.criteria());
+    m_pref.experimental.tooltipDelay(tooltipDelay()->textInt());
 
-#ifdef _WIN32
+#if LAF_WINDOWS
+    // Windows API tablet settings
     {
       os::TabletAPI tabletAPI = os::TabletAPI::Default;
       std::string tabletStr;
@@ -856,64 +1005,89 @@ public:
       m_pref.tablet.api(tabletStr);
       m_pref.experimental.loadWintabDriver(wintabState);
 
-      manager()->display()->nativeWindow()
-        ->setInterpretOneFingerGestureAsMouseMovement(
-          oneFingerAsMouseMovement()->isSelected());
+      manager()->display()->nativeWindow()->setInterpretOneFingerGestureAsMouseMovement(
+        oneFingerAsMouseMovement()->isSelected());
 
-      os::instance()->setTabletAPI(tabletAPI);
+      os::TabletOptions options;
+      options.api = tabletAPI;
+      options.setCursorFix = m_pref.tablet.setCursorFix();
+      m_system->setTabletOptions(options);
+    }
+    // File Explorer Thumbnails
+    {
+      if (win::set_thumbnail_options("aseprite", windowsFileExplorerThumbnailsOptionsFromUI()))
+        m_restartExplorerProc = true;
     }
 #endif
 
     ui::set_use_native_cursors(m_pref.cursor.useNativeCursor());
     ui::set_mouse_cursor_scale(m_pref.cursor.cursorScale());
 
+    // Change theme font
+    bool reset_theme = false;
+    {
+      const FontInfo fontInfo = (customThemeFont()->isSelected() ? themeFont()->info() :
+                                                                   FontInfo());
+      const FontInfo miniFontInfo = (customMiniFont()->isSelected() ? themeMiniFont()->info() :
+                                                                      FontInfo());
+
+      auto fontStr = base::convert_to<std::string>(fontInfo);
+      auto miniFontStr = base::convert_to<std::string>(miniFontInfo);
+
+      if (m_pref.theme.font() != fontStr || m_pref.theme.miniFont() != miniFontStr) {
+        m_pref.theme.font(fontStr);
+        m_pref.theme.miniFont(miniFontStr);
+
+        reset_theme = true;
+      }
+    }
+
     bool reset_screen = false;
-    int newScreenScale = base::convert_to<int>(screenScale()->getValue());
+    const int newScreenScale = base::convert_to<int>(screenScale()->getValue());
     if (newScreenScale != m_pref.general.screenScale()) {
       m_pref.general.screenScale(newScreenScale);
       reset_screen = true;
     }
 
-    int newUIScale = base::convert_to<int>(uiScale()->getValue());
+    const int newUIScale = base::convert_to<int>(uiScale()->getValue());
     if (newUIScale != m_pref.general.uiScale()) {
       m_pref.general.uiScale(newUIScale);
-      ui::set_theme(ui::get_theme(),
-                    newUIScale);
+      reset_theme = true;
       reset_screen = true;
     }
 
-    bool newGpuAccel = gpuAcceleration()->isSelected();
+    if (reset_theme)
+      ui::set_theme(ui::get_theme(), newUIScale);
+
+#ifdef ENABLE_DEVMODE
+    const bool newGpuAccel = gpuAcceleration()->isSelected();
     if (newGpuAccel != m_pref.general.gpuAcceleration()) {
       m_pref.general.gpuAcceleration(newGpuAccel);
       reset_screen = true;
     }
+#endif
 
-    if (os::instance()->menus() &&
-        m_pref.general.showMenuBar() != showMenuBar()->isSelected()) {
+    if (m_system->menus() && m_pref.general.showMenuBar() != showMenuBar()->isSelected()) {
       m_pref.general.showMenuBar(showMenuBar()->isSelected());
     }
 
-    bool newShowHome = showHome()->isSelected();
-    if (newShowHome != m_pref.general.showHome())
-      m_pref.general.showHome(newShowHome);
+    m_pref.general.showHome(showHome()->isSelected());
 
     m_pref.save();
 
     if (!warnings.empty()) {
-      ui::Alert::show(
-        fmt::format(Strings::alerts_restart_by_preferences(),
-                    warnings));
+      ui::Alert::show(Strings::alerts_restart_by_preferences(warnings));
     }
 
     // Probably it's safe to switch this flag in runtime
-    if (m_pref.experimental.multipleWindows() != ui::get_multiple_displays())
-      ui::set_multiple_displays(m_pref.experimental.multipleWindows());
+    ui::set_multiple_displays(m_pref.experimental.multipleWindows());
 
     if (reset_screen)
       updateScreenScaling();
   }
 
-  void restoreTheme() {
+  void restoreTheme()
+  {
     if (m_pref.theme.selected() != m_restoreThisTheme) {
       setUITheme(m_restoreThisTheme, false);
 
@@ -930,7 +1104,16 @@ public:
     }
   }
 
-  bool showDialogToInstallExtension(const std::string& filename) {
+  void restoreDefaultTheme()
+  {
+    setUITheme(m_pref.theme.selected.defaultValue(), false);
+    m_pref.general.screenScale.setValue(skin::SkinTheme::get(this)->preferredScreenScaling());
+    m_pref.general.uiScale.setValue(skin::SkinTheme::get(this)->preferredUIScaling());
+    updateScreenScaling();
+  }
+
+  bool showDialogToInstallExtension(const std::string& filename)
+  {
     for (Widget* item : sectionListbox()->children()) {
       if (auto listItem = dynamic_cast<const ListItem*>(item)) {
         if (listItem->getValue() == kSectionExtensionsId) {
@@ -940,18 +1123,72 @@ public:
       }
     }
 
+    // Get the extension information from the compressed
+    // package.json file.
+    const ExtensionInfo info = App::instance()->extensions().getCompressedExtensionInfo(filename);
+    // Check if the filename corresponds to aseprite-default theme
+    if (base::string_to_lower(info.name) == Extension::kAsepriteDefaultThemeExtensionName) {
+      ui::Alert::show(Strings::alerts_cannot_install_default_extension());
+      return false;
+    }
+
     // Install?
-    if (ui::Alert::show(
-          fmt::format(Strings::alerts_install_extension(), filename)) != 1)
+    if (ui::Alert::show(Strings::alerts_install_extension(filename)) != 1)
       return false;
 
     installExtension(filename);
     return true;
   }
 
-private:
+protected:
+  void onOpen(Event& evt) override
+  {
+    sectionListbox()->selectIndex(m_curSection);
+    app::gen::Options::onOpen(evt);
+  }
 
-  void fillThemeVariants() {
+private:
+  void onInitTheme(InitThemeEvent& ev) override
+  {
+    app::gen::Options::onInitTheme(ev);
+
+    fontPreview()->setFont(m_font);
+    miniFontPreview()->setFont(m_miniFont);
+  }
+
+  bool onProcessMessage(Message* msg) override
+  {
+    switch (msg->type()) {
+      case kDropFilesMessage: {
+        base::paths files = static_cast<DropFilesMessage*>(msg)->files();
+        for (const auto& fn : files) {
+          const auto& extension = base::string_to_lower(base::get_file_extension(fn));
+          if (extension == "aseprite-extension" || extension == "zip")
+            showDialogToInstallExtension(fn);
+        }
+        return true;
+      }
+
+      case kFocusEnterMessage:
+        // Resets the search when we focus any widget that has mouse interaction, unless it's in the
+        // section list
+        if (msg->recipient() == sectionListbox() ||
+            (msg->recipient()->type() == kListItemWidget &&
+             msg->recipient()->parent() == sectionListbox()) ||
+            msg->recipient() == search() || msg->recipient()->hasFlags(IGNORE_MOUSE))
+          return false;
+
+        if (!search()->text().empty()) {
+          search()->clear();
+          onSearch();
+        }
+        break;
+    }
+    return Window::onProcessMessage(msg);
+  }
+
+  void fillThemeVariants()
+  {
     ButtonSet* list = nullptr;
     for (Extension* ext : App::instance()->extensions()) {
       if (ext->isCurrentTheme()) {
@@ -966,8 +1203,7 @@ private:
           list = new ButtonSet(c);
           for (auto it : ext->themes()) {
             if (!it.second.variant.empty()) {
-              auto item = list->addItem(
-                new ThemeVariantItem(this, it.first, it.second.variant));
+              auto item = list->addItem(new ThemeVariantItem(this, it.first, it.second.variant));
 
               if (it.first == Preferences::instance().theme.selected())
                 list->setSelectedItem(item, false);
@@ -985,12 +1221,48 @@ private:
       m_themeVars->deferDelete();
     }
     m_themeVars = list;
-    themeVariants()->setVisible(list ? true: false);
+    themeModeLabel()->setBuddy(m_themeVars);
+    themeVariants()->setVisible(list ? true : false);
     themeVariants()->initTheme();
   }
 
-  void fillExtensionsCombobox(ui::ComboBox* combobox,
-                              const std::string& defExt) {
+  void fillThemeFonts()
+  {
+    auto& pref = Preferences::instance();
+    const FontInfo fontInfo = base::convert_to<FontInfo>(pref.theme.font());
+    const FontInfo miniInfo = base::convert_to<FontInfo>(pref.theme.miniFont());
+
+    customThemeFont()->setSelected(fontInfo.isValid());
+    customMiniFont()->setSelected(miniInfo.isValid());
+
+    themeFont()->setEnabled(fontInfo.isValid());
+    themeMiniFont()->setEnabled(miniInfo.isValid());
+
+    themeFont()->setInfo(fontInfo, FontEntry::From::Init);
+    themeMiniFont()->setInfo(miniInfo, FontEntry::From::Init);
+  }
+
+  void onSwitchCustomFontCheckBox(CheckBox* fontCheckBox, FontEntry* fontEntry, const FontInfo& fi)
+  {
+    const bool state = fontCheckBox->isSelected();
+    fontEntry->setEnabled(state);
+    fontEntry->setInfo(fi, FontEntry::From::Init);
+  }
+
+  void updateFontPreviews()
+  {
+    m_font = Fonts::instance()->fontFromInfo(themeFont()->info());
+    m_miniFont = Fonts::instance()->fontFromInfo(themeMiniFont()->info());
+    if (!m_miniFont)
+      m_miniFont = skin::SkinTheme::get(this)->getMiniFont();
+
+    fontPreview()->setFont(m_font);
+    miniFontPreview()->setFont(m_miniFont);
+    layout();
+  }
+
+  void fillExtensionsCombobox(ui::ComboBox* combobox, const std::string& defExt)
+  {
     base::paths exts = get_writable_extensions();
     for (const auto& e : exts) {
       int index = combobox->addItem(e);
@@ -999,41 +1271,194 @@ private:
     }
   }
 
-  std::string getExtension(ui::ComboBox* combobox) {
+  std::string getExtension(ui::ComboBox* combobox)
+  {
     Widget* defExt = combobox->getSelectedItem();
     ASSERT(defExt);
-    return (defExt ? defExt->text(): std::string());
+    return (defExt ? defExt->text() : std::string());
   }
 
-  void selectScalingItems() {
+  void selectScalingItems()
+  {
     // Screen/UI Scale
-    screenScale()->setSelectedItemIndex(
-      screenScale()->findItemIndexByValue(
-        base::convert_to<std::string>(m_pref.general.screenScale())));
+    screenScale()->setSelectedItemIndex(screenScale()->findItemIndexByValue(
+      base::convert_to<std::string>(m_pref.general.screenScale())));
 
     uiScale()->setSelectedItemIndex(
-      uiScale()->findItemIndexByValue(
-        base::convert_to<std::string>(m_pref.general.uiScale())));
+      uiScale()->findItemIndexByValue(base::convert_to<std::string>(m_pref.general.uiScale())));
   }
 
-  void updateScreenScaling() {
+  void updateScreenScaling()
+  {
     ui::Manager* manager = ui::Manager::getDefault();
-    os::instance()->setGpuAcceleration(m_pref.general.gpuAcceleration());
-    manager->updateAllDisplaysWithNewScale(m_pref.general.screenScale());
+    manager->updateAllDisplays(m_pref.general.screenScale(), m_pref.general.gpuAcceleration());
   }
 
-  void onApply() {
+  void onApply()
+  {
     saveConfig();
     m_restoreThisTheme = m_pref.theme.selected();
     m_restoreScreenScaling = m_pref.general.screenScale();
     m_restoreUIScaling = m_pref.general.uiScale();
   }
 
-  void onNativeCursorChange() {
+  void onResetDefault()
+  {
+    if (ui::Alert::show(Strings::alerts_reset_default_confirm()) != 1)
+      return;
+
+    if (recentReset()->isSelected()) {
+      auto prevLimit = m_pref.general.recentItems();
+      App::instance()->recentFiles()->setLimit(0);
+      App::instance()->recentFiles()->setLimit(prevLimit);
+    }
+
+    if (installedReset()->isSelected()) {
+      // If we're not on the default theme, restore it, since we're gonna be deleting it.
+      restoreDefaultTheme();
+
+      // Load a list with the extensions we can uninstall first, to avoid iterator issues when
+      // deleting in-loop.
+      Extensions::List uninstall;
+      for (auto* e : App::instance()->extensions()) {
+        if (!e->canBeUninstalled())
+          continue;
+
+        uninstall.push_back(e);
+      }
+
+      for (auto* e : uninstall) {
+        try {
+          App::instance()->extensions().uninstallExtension(e, DeletePluginPref::Yes);
+        }
+        catch (const std::exception& ex) {
+          LOG(ERROR,
+              "Uninstalling extension '%s' failed with error '%s'\n",
+              e->displayName().c_str(),
+              ex.what());
+          Console::showException(ex);
+        }
+      }
+
+      ResourceFinder rf;
+      rf.includeUserDir("palettes");
+      const auto& paletteDir = rf.defaultFilename();
+      for (const auto& item : base::list_files(paletteDir)) {
+        const auto path = base::join_path(paletteDir, item);
+        if (base::is_file(path) && item != "default.ase" &&
+            base::string_to_lower(base::get_file_extension(path)) == "ase") {
+          try {
+            base::delete_file(path);
+            LOG(VERBOSE, "Deleted palette: '%s'\n", item.c_str());
+          }
+          catch (const std::exception& ex) {
+            LOG(ERROR, "Error deleting palette file: %s - %s", path.c_str(), ex.what());
+          }
+        }
+      }
+    }
+
+    if (perfileReset()->isSelected()) {
+      ResourceFinder rf;
+      rf.includeUserDir("files");
+      const auto& filesDirectory = rf.defaultFilename();
+
+      for (const auto& item : base::list_files(filesDirectory)) {
+        const auto path = base::join_path(filesDirectory, item);
+        if (base::is_file(path) && base::string_to_lower(base::get_file_extension(path)) == "ini") {
+          try {
+            base::delete_file(path);
+            LOG(VERBOSE, "Deleted per-file setting '%s'\n", item.c_str());
+          }
+          catch (const std::exception& ex) {
+            LOG(ERROR, "Error deleting ini file: %s - %s", path.c_str(), ex.what());
+          }
+        }
+      }
+    }
+
+    if (toolsReset()->isSelected()) {
+      auto* toolBox = App::instance()->toolBox();
+      for (tools::ToolIterator it = toolBox->begin(); it != toolBox->end(); ++it) {
+        tools::Tool* tool = *it;
+        m_pref.resetToolPreferences(tool);
+        LOG(VERBOSE, "Reset tool preferences for tool '%s'\n", tool->getId().c_str());
+      }
+    }
+
+    if (windowReset()->isSelected()) {
+      // TODO avoid enumerating all config sections here
+      static constexpr auto windowSections = {
+        "GfxMode",           "CanvasSize",        "CelProperties",     "ChangePixelFormat",
+        "ExportSpriteSheet", "ImportSpriteSheet", "KeyboardShortcuts", "LayerProperties",
+        "MaskColor",         "ExportFile",        "SpriteProperties",  "SpriteSize",
+        "UndoHistory",       "FileSelector",      "MiniEditor",        "BrightnessContrast",
+        "ConvolutionMatrix", "Despeckle",         "HueSaturation",     "InvertColor",
+        "Outline",           "Replace Color"
+      };
+      for (const auto* windowSection : windowSections)
+        del_window_pos(windowSection);
+    }
+
+    if (brushesReset()->isSelected()) {
+      const auto userBrushPath = AppBrushes::userBrushesFilename();
+      if (base::is_file(userBrushPath)) {
+        try {
+          base::delete_file(userBrushPath);
+          LOG(VERBOSE, "Deleted user brushes file");
+
+          App::instance()->brushes().reset();
+        }
+        catch (const std::exception& ex) {
+          LOG(ERROR, "Error resetting user brushes: %s - %s", userBrushPath.c_str(), ex.what());
+        }
+      }
+    }
+
+    if (defaultReset()->isSelected()) {
+      onResetAlerts();
+      onResetBg();
+      onResetColorManagement();
+      onResetGrid();
+      onResetTimelineSel();
+
+      // If we're not on the default theme, restore it.
+      m_restoreThisTheme = m_pref.theme.selected.defaultValue();
+      restoreTheme();
+
+      // Resetting all things.
+      for (Section* section : m_pref.sectionList()) {
+        if (strcmp(section->name(), "updater") == 0)
+          continue; // Ignore updater to preserve the UUID and other data.
+        for (OptionBase* option : section->optionList()) {
+          option->resetToDefault();
+        }
+        section->save();
+      }
+
+      restoreDefaultTheme();
+
+      m_pref.save();
+      loadFromPreferences();
+
+      // Temporarily set the language preference to an empty string
+      // to avoid setCurrentLanguage ignoring the change.
+      m_pref.general.language("");
+      Strings::instance()->setCurrentLanguage(Strings::kDefLanguage);
+
+      // Language reset
+      refillLanguages();
+    }
+
+    saveConfig(false);
+    closeWindow(nullptr);
+  }
+
+  void onNativeCursorChange()
+  {
     bool state =
       // If the platform supports custom cursors...
-      (((int(os::instance()->capabilities()) &
-         int(os::Capabilities::CustomMouseCursor)) != 0) &&
+      ((m_system->hasCapability(os::Capabilities::CustomMouseCursor)) &&
        // If the native cursor option is not selec
        !nativeCursor()->isSelected());
 
@@ -1041,7 +1466,8 @@ private:
     cursorScale()->setEnabled(state);
   }
 
-  void onChangeSection() {
+  void onChangeSection()
+  {
     ListItem* item = static_cast<ListItem*>(sectionListbox()->getSelectedChild());
     if (!item)
       return;
@@ -1067,11 +1493,30 @@ private:
     panel()->showChild(findChild(item->getValue().c_str()));
   }
 
-  void onClearRecentFiles() {
-    App::instance()->recentFiles()->clear();
+  void onLanguageChange()
+  {
+    auto* item = dynamic_cast<const LangItem*>(language()->getSelectedItem());
+    if (!item)
+      return;
+
+    const std::string lang = item->langId();
+    const bool state = (lang == "ar" || lang == "ja" || lang == "ko" || lang == "th" ||
+                        lang == "yue_Hant" || lang == "zh_Hans" || lang == "zh_Hant");
+    fontWarningFiller()->setVisible(state);
+    fontWarning()->setVisible(state);
+    layout();
+
+    // Clear search text cache inside widgets
+    WidgetsList allWidgets;
+    allWidgetsIn(this, allWidgets);
+    for (auto* widget : allWidgets)
+      widget->removeProperty(SearchTextProperty::Name);
   }
 
-  void onColorManagement() {
+  void onClearRecentFiles() { App::instance()->recentFiles()->clear(); }
+
+  void onColorManagement()
+  {
     const bool state = colorManagement()->isSelected();
     windowCsLabel()->setEnabled(state);
     windowCs()->setEnabled(state);
@@ -1086,7 +1531,8 @@ private:
     opacity()->setSelectedItemIndex(static_cast<int>(m_pref.range.opacity()));
   }
 
-  void onResetColorManagement() {
+  void onResetColorManagement()
+  {
     updateColorProfileControls(m_pref.color.manage.defaultValue(),
                                m_pref.color.windowProfile.defaultValue(),
                                m_pref.color.windowProfileName.defaultValue(),
@@ -1096,11 +1542,12 @@ private:
   }
 
   void updateColorProfileControls(const bool manage,
-                                  const app::gen::WindowColorProfile& windowProfile,
+                                  const app::gen::WindowColorProfile windowProfile,
                                   const std::string& windowProfileName,
                                   const std::string& workingRgbSpace,
-                                  const app::gen::ColorProfileBehavior& filesWithProfile,
-                                  const app::gen::ColorProfileBehavior& missingProfile) {
+                                  const app::gen::ColorProfileBehavior filesWithProfile,
+                                  const app::gen::ColorProfileBehavior missingProfile)
+  {
     colorManagement()->setSelected(manage);
 
     // Window color profile
@@ -1119,14 +1566,13 @@ private:
       int j = 2;
       for (auto& cs : m_colorSpaces) {
         // We add ICC profiles only
-        auto gfxCs = cs->gfxColorSpace();
+        auto& gfxCs = cs->gfxColorSpace();
         if (gfxCs->type() != gfx::ColorSpace::ICC)
           continue;
 
-        auto name = gfxCs->name();
+        auto& name = gfxCs->name();
         windowCs()->addItem(fmt::format(m_templateTextForDisplayCS, name));
-        if (windowProfile == gen::WindowColorProfile::SPECIFIC &&
-            windowProfileName == name) {
+        if (windowProfile == gen::WindowColorProfile::SPECIFIC && windowProfileName == name) {
           i = j;
         }
         ++j;
@@ -1142,14 +1588,14 @@ private:
       }
     }
 
-    for (int i=0; i<sizeof(filesWithCsMap)/sizeof(filesWithCsMap[0]); ++i) {
+    for (int i = 0; i < sizeof(filesWithCsMap) / sizeof(filesWithCsMap[0]); ++i) {
       if (filesWithCsMap[i] == filesWithProfile) {
         filesWithCs()->setSelectedItemIndex(i);
         break;
       }
     }
 
-    for (int i=0; i<sizeof(missingCsMap)/sizeof(missingCsMap[0]); ++i) {
+    for (int i = 0; i < sizeof(missingCsMap) / sizeof(missingCsMap[0]); ++i) {
       if (missingCsMap[i] == missingProfile) {
         missingCs()->setSelectedItemIndex(i);
         break;
@@ -1159,11 +1605,13 @@ private:
     onColorManagement();
   }
 
-  void onResetAlerts() {
+  void onResetAlerts()
+  {
     fileFormatDoesntSupportAlert()->resetWithDefaultValue();
     exportAnimationInSequenceAlert()->resetWithDefaultValue();
     overwriteFilesOnExportAlert()->resetWithDefaultValue();
     overwriteFilesOnExportSpriteSheetAlert()->resetWithDefaultValue();
+    deleteTilemapDeleteUnusedTilesetAlert()->resetWithDefaultValue();
     advancedModeAlert()->resetWithDefaultValue();
     invalidFgBgColorAlert()->resetWithDefaultValue();
     runScriptAlert()->resetWithDefaultValue();
@@ -1172,9 +1620,11 @@ private:
     jpegOptionsAlert()->resetWithDefaultValue();
     svgOptionsAlert()->resetWithDefaultValue();
     tgaOptionsAlert()->resetWithDefaultValue();
+    webpOptionsAlert()->resetWithDefaultValue();
   }
 
-  void onChangeBgScope() {
+  void onChangeBgScope()
+  {
     const int item = bgScope()->getSelectedItemIndex();
     switch (item) {
       case 0: m_curPref = &m_globPref; break;
@@ -1189,7 +1639,8 @@ private:
     onCheckeredBgSizeChange();
   }
 
-  void onCheckeredBgSizeChange() {
+  void onCheckeredBgSizeChange()
+  {
     if (checkeredBgSize()->getSelectedItemIndex() == int(app::gen::BgType::CHECKERED_CUSTOM)) {
       checkeredBgCustomW()->setTextf("%d", m_curPref->bg.size().w);
       checkeredBgCustomH()->setTextf("%d", m_curPref->bg.size().h);
@@ -1203,7 +1654,8 @@ private:
     sectionBg()->layout();
   }
 
-  void onChangeGridScope() {
+  void onChangeGridScope()
+  {
     int item = gridScope()->getSelectedItemIndex();
 
     switch (item) {
@@ -1212,10 +1664,11 @@ private:
     }
 
     gridVisible()->setSelected(m_curPref->show.grid());
-    gridX()->setTextf("%d", m_curPref->grid.bounds().x);
-    gridY()->setTextf("%d", m_curPref->grid.bounds().y);
-    gridW()->setTextf("%d", m_curPref->grid.bounds().w);
-    gridH()->setTextf("%d", m_curPref->grid.bounds().h);
+    const auto& gridBounds = m_curPref->grid.bounds();
+    gridX()->setTextf("%d", gridBounds.x);
+    gridY()->setTextf("%d", gridBounds.y);
+    gridW()->setTextf("%d", gridBounds.w);
+    gridH()->setTextf("%d", gridBounds.h);
 
     gridColor()->setColor(m_curPref->grid.color());
     gridOpacity()->setValue(m_curPref->grid.opacity());
@@ -1227,7 +1680,8 @@ private:
     pixelGridAutoOpacity()->setSelected(m_curPref->pixelGrid.autoOpacity());
   }
 
-  void onResetBg() {
+  void onResetBg()
+  {
     DocumentPreferences& pref = m_globPref;
 
     // Reset global preferences (use default values specified in pref.xml)
@@ -1248,16 +1702,18 @@ private:
     }
   }
 
-  void onResetGrid() {
+  void onResetGrid()
+  {
     DocumentPreferences& pref = m_globPref;
 
     // Reset global preferences (use default values specified in pref.xml)
     if (m_curPref == &m_globPref) {
       gridVisible()->setSelected(pref.show.grid.defaultValue());
-      gridX()->setTextf("%d", pref.grid.bounds.defaultValue().x);
-      gridY()->setTextf("%d", pref.grid.bounds.defaultValue().y);
-      gridW()->setTextf("%d", pref.grid.bounds.defaultValue().w);
-      gridH()->setTextf("%d", pref.grid.bounds.defaultValue().h);
+      const auto& defaultBounds = pref.grid.bounds.defaultValue();
+      gridX()->setTextf("%d", defaultBounds.x);
+      gridY()->setTextf("%d", defaultBounds.y);
+      gridW()->setTextf("%d", defaultBounds.w);
+      gridH()->setTextf("%d", defaultBounds.h);
 
       gridColor()->setColor(pref.grid.color.defaultValue());
       gridOpacity()->setValue(pref.grid.opacity.defaultValue());
@@ -1271,10 +1727,11 @@ private:
     // Reset document preferences with global settings
     else {
       gridVisible()->setSelected(pref.show.grid());
-      gridX()->setTextf("%d", pref.grid.bounds().x);
-      gridY()->setTextf("%d", pref.grid.bounds().y);
-      gridW()->setTextf("%d", pref.grid.bounds().w);
-      gridH()->setTextf("%d", pref.grid.bounds().h);
+      const auto& prefBounds = pref.grid.bounds();
+      gridX()->setTextf("%d", prefBounds.x);
+      gridY()->setTextf("%d", prefBounds.y);
+      gridW()->setTextf("%d", prefBounds.w);
+      gridH()->setTextf("%d", prefBounds.h);
 
       gridColor()->setColor(pref.grid.color());
       gridOpacity()->setValue(pref.grid.opacity());
@@ -1287,16 +1744,15 @@ private:
     }
   }
 
-  void onLocateCrashFolder() {
-    app::launcher::open_folder(
-      base::get_file_path(App::instance()->memoryDumpFilename()));
+  void onLocateCrashFolder()
+  {
+    app::launcher::open_folder(base::get_file_path(App::instance()->memoryDumpFilename()));
   }
 
-  void onLocateConfigFile() {
-    app::launcher::open_folder(app::main_config_filename());
-  }
+  void onLocateConfigFile() { app::launcher::open_folder(app::main_config_filename()); }
 
-  void onLimitUndoCheck() {
+  void onLimitUndoCheck()
+  {
     if (limitUndo()->isSelected()) {
       undoSizeLimit()->setEnabled(true);
       undoSizeLimit()->setTextf("%d", m_pref.undo.sizeLimit());
@@ -1307,12 +1763,14 @@ private:
     }
   }
 
-  void refillLanguages() {
+  void refillLanguages()
+  {
     language()->deleteAllItems();
     loadLanguages();
   }
 
-  void loadLanguages() {
+  void loadLanguages()
+  {
     // Languages already loaded
     if (language()->getItemCount() > 0)
       return;
@@ -1338,14 +1796,16 @@ private:
     }
   }
 
-  void reloadThemes() {
+  void reloadThemes()
+  {
     while (auto child = themeList()->lastChild())
       delete child;
 
     loadThemes();
   }
 
-  void loadThemes() {
+  void loadThemes()
+  {
     // Themes already loaded
     if (themeList()->getItemsCount() > 0)
       return;
@@ -1366,16 +1826,13 @@ private:
 
       std::sort(files.begin(), files.end());
       for (auto& fn : files) {
-        std::string fullPath =
-          base::normalize_path(
-            base::join_path(path, fn));
+        std::string fullPath = base::normalize_path(base::join_path(path, fn));
         if (!base::is_directory(fullPath))
           continue;
 
         if (first) {
           first = false;
-          themeList()->addChild(
-            new SeparatorInView(base::normalize_path(path), HORIZONTAL));
+          themeList()->addChild(new SeparatorInView(base::normalize_path(path), HORIZONTAL));
         }
 
         ThemeItem* item = new ThemeItem(fn, fullPath);
@@ -1393,20 +1850,17 @@ private:
       if (!ext->isEnabled())
         continue;
 
-      if (ext->themes().empty())
+      if (ext->themes().empty() || isExtensionADuplicatedDefaultTheme(ext))
         continue;
 
       if (first) {
         first = false;
-        themeList()->addChild(
-          new SeparatorInView(Strings::options_extension_themes(), HORIZONTAL));
+        themeList()->addChild(new SeparatorInView(Strings::options_extension_themes(), HORIZONTAL));
       }
 
       for (auto it : ext->themes()) {
-        ThemeItem* item = new ThemeItem(it.first,
-                                        it.second.path,
-                                        ext->displayName(),
-                                        it.second.variant);
+        ThemeItem* item =
+          new ThemeItem(it.first, it.second.path, ext->displayName(), it.second.variant);
         themeList()->addChild(item);
 
         // Selected theme
@@ -1418,13 +1872,15 @@ private:
     themeList()->layout();
   }
 
-  void loadExtensionsByCategory(const Extension::Category category,
-                                const std::string& label) {
+  void loadExtensionsByCategory(const Extension::Category category, const std::string& label)
+  {
     bool hasItems = false;
     auto sep = new ExtensionCategorySeparator(category, label);
     extensionsList()->addChild(sep);
     for (auto e : App::instance()->extensions()) {
       if (e->category() == category) {
+        if (category == Extension::Category::Themes && isExtensionADuplicatedDefaultTheme(e))
+          continue;
         ExtensionItem* item = new ExtensionItem(e);
         extensionsList()->addChild(item);
         hasItems = true;
@@ -1433,52 +1889,43 @@ private:
     sep->setVisible(hasItems);
   }
 
-  void loadExtensions() {
+  void loadExtensions()
+  {
     // Extensions already loaded
     if (extensionsList()->getItemsCount() > 0)
       return;
 
-    loadExtensionsByCategory(
-      Extension::Category::Keys,
-      Strings::options_keys_extensions());
+    loadExtensionsByCategory(Extension::Category::Keys, Strings::options_keys_extensions());
 
-    loadExtensionsByCategory(
-      Extension::Category::Languages,
-      Strings::options_language_extensions());
+    loadExtensionsByCategory(Extension::Category::Languages,
+                             Strings::options_language_extensions());
 
-    loadExtensionsByCategory(
-      Extension::Category::Themes,
-      Strings::options_theme_extensions());
+    loadExtensionsByCategory(Extension::Category::Themes, Strings::options_theme_extensions());
 
 #ifdef ENABLE_SCRIPTING
-    loadExtensionsByCategory(
-      Extension::Category::Scripts,
-      Strings::options_script_extensions());
+    loadExtensionsByCategory(Extension::Category::Scripts, Strings::options_script_extensions());
 #endif
 
-    loadExtensionsByCategory(
-      Extension::Category::Palettes,
-      Strings::options_palette_extensions());
+    loadExtensionsByCategory(Extension::Category::Palettes, Strings::options_palette_extensions());
 
-    loadExtensionsByCategory(
-      Extension::Category::DitheringMatrices,
-      Strings::options_dithering_matrix_extensions());
+    loadExtensionsByCategory(Extension::Category::DitheringMatrices,
+                             Strings::options_dithering_matrix_extensions());
 
-    loadExtensionsByCategory(
-      Extension::Category::Multiple,
-      Strings::options_multiple_extensions());
+    loadExtensionsByCategory(Extension::Category::Multiple, Strings::options_multiple_extensions());
 
     onExtensionChange();
     extensionsList()->layout();
   }
 
-  void onThemeChange() {
+  void onThemeChange()
+  {
     ThemeItem* item = dynamic_cast<ThemeItem*>(themeList()->getSelectedChild());
     selectTheme()->setEnabled(item && item->canSelect());
     openThemeFolder()->setEnabled(item != nullptr);
   }
 
-  void onSelectTheme() {
+  void onSelectTheme()
+  {
     ThemeItem* item = dynamic_cast<ThemeItem*>(themeList()->getSelectedChild());
     if (item)
       setUITheme(item->themeName(), true);
@@ -1486,7 +1933,8 @@ private:
 
   void setUITheme(const std::string& themeName,
                   const bool updateScaling,
-                  const bool recreateVariantsFields = true) {
+                  const bool recreateVariantsFields = true)
+  {
     try {
       if (themeName != m_pref.theme.selected()) {
         auto theme = skin::SkinTheme::get(this);
@@ -1505,27 +1953,23 @@ private:
             ((newUIScale > 0 && m_pref.general.uiScale() != newUIScale) ||
              (newScreenScale > 0 && m_pref.general.screenScale() != newScreenScale))) {
           // Ask if the user want to adjust the Screen/UI Scaling
-          const int result =
-            ui::Alert::show(
-              fmt::format(
-                Strings::alerts_update_screen_ui_scaling_with_theme_values(),
-                themeName,
-                100 * m_pref.general.screenScale(),
-                100 * (newScreenScale > 0 ? newScreenScale: m_pref.general.screenScale()),
-                100 * m_pref.general.uiScale(),
-                100 * (newUIScale > 0 ? newUIScale: m_pref.general.uiScale())));
+          const int result = ui::Alert::show(
+            Strings::alerts_update_screen_ui_scaling_with_theme_values(
+              themeName,
+              100 * m_pref.general.screenScale(),
+              100 * (newScreenScale > 0 ? newScreenScale : m_pref.general.screenScale()),
+              100 * m_pref.general.uiScale(),
+              100 * (newUIScale > 0 ? newUIScale : m_pref.general.uiScale())));
 
           if (result == 1) {
             // Preferred UI Scaling factor
-            if (newUIScale > 0 &&
-                newUIScale != m_pref.general.uiScale()) {
+            if (newUIScale > 0 && newUIScale != m_pref.general.uiScale()) {
               m_pref.general.uiScale(newUIScale);
               ui::set_theme(theme, m_pref.general.uiScale());
             }
 
             // Preferred Screen Scaling
-            if (newScreenScale > 0 &&
-                newScreenScale != m_pref.general.screenScale()) {
+            if (newScreenScale > 0 && newScreenScale != m_pref.general.screenScale()) {
               m_pref.general.screenScale(newScreenScale);
               updateScreenScaling();
             }
@@ -1543,20 +1987,21 @@ private:
     }
   }
 
-  void onOpenThemeFolder() {
+  void onOpenThemeFolder()
+  {
     ThemeItem* item = dynamic_cast<ThemeItem*>(themeList()->getSelectedChild());
     if (item)
       item->openFolder();
   }
 
-  void onExtensionChange() {
+  void onExtensionChange()
+  {
     ExtensionItem* item = dynamic_cast<ExtensionItem*>(extensionsList()->getSelectedChild());
     if (item && item->isInstalled()) {
-      disableExtension()->setText(item->isEnabled() ?
-                                  Strings::options_disable_extension():
-                                  Strings::options_enable_extension());
+      disableExtension()->setText(item->isEnabled() ? Strings::options_disable_extension() :
+                                                      Strings::options_enable_extension());
       disableExtension()->processMnemonicFromText();
-      disableExtension()->setEnabled(item->isEnabled() ? item->canBeDisabled(): true);
+      disableExtension()->setEnabled(item->isEnabled() ? item->canBeDisabled() : true);
       uninstallExtension()->setEnabled(item->canBeUninstalled());
       openExtensionFolder()->setEnabled(true);
     }
@@ -1567,19 +2012,23 @@ private:
     }
   }
 
-  void onAddExtension() {
+  void onAddExtension()
+  {
     base::paths exts = { "aseprite-extension", "zip" };
     base::paths filename;
-    if (!app::show_file_selector(
-          Strings::options_add_extension_title(), "", exts,
-          FileSelectorType::Open, filename))
+    if (!app::show_file_selector(Strings::options_add_extension_title(),
+                                 "",
+                                 exts,
+                                 FileSelectorType::Open,
+                                 filename))
       return;
 
     ASSERT(!filename.empty());
     installExtension(filename.front());
   }
 
-  void installExtension(const std::string& filename) {
+  void installExtension(const std::string& filename)
+  {
     try {
       Extensions& exts = App::instance()->extensions();
 
@@ -1587,30 +2036,30 @@ private:
       // package.json file.
       ExtensionInfo info = exts.getCompressedExtensionInfo(filename);
 
+      if (info.defaultTheme) {
+        ui::Alert::show(Strings::alerts_cannot_install_default_extension());
+        return;
+      }
       // Check if the extension already exist
       for (auto ext : exts) {
-        if (base::string_to_lower(ext->name()) !=
-            base::string_to_lower(info.name))
+        if (base::string_to_lower(ext->name()) != base::string_to_lower(info.name))
           continue;
 
-        bool isDowngrade =
-          base::Version(info.version.c_str()) <
-          base::Version(ext->version().c_str());
+        bool isDowngrade = base::Version(info.version.c_str()) <
+                           base::Version(ext->version().c_str());
 
         // Uninstall?
-        if (ui::Alert::show(
-              fmt::format(
-                Strings::alerts_update_extension(),
-                ext->name(),
-                (isDowngrade ? Strings::alerts_update_extension_downgrade():
-                               Strings::alerts_update_extension_upgrade()),
-                ext->version(),
-                info.version)) != 1)
+        if (ui::Alert::show(Strings::alerts_update_extension(
+              ext->name(),
+              (isDowngrade ? Strings::alerts_update_extension_downgrade() :
+                             Strings::alerts_update_extension_upgrade()),
+              ext->version(),
+              info.version)) != 1)
           return;
 
         // Uninstall old version
         if (ext->canBeUninstalled()) {
-          exts.uninstallExtension(ext, DeletePluginPref::kNo);
+          exts.uninstallExtension(ext, DeletePluginPref::No);
 
           ExtensionItem* item = getItemByExtension(ext);
           if (item)
@@ -1628,32 +2077,33 @@ private:
       ExtensionItem* item = new ExtensionItem(ext);
       extensionsList()->addChild(item);
       updateCategoryVisibility();
-      extensionsList()->sortItems(
-        [](Widget* a, Widget* b){
-          auto aSep = dynamic_cast<ExtensionCategorySeparator*>(a);
-          auto bSep = dynamic_cast<ExtensionCategorySeparator*>(b);
-          auto aItem = dynamic_cast<ExtensionItem*>(a);
-          auto bItem = dynamic_cast<ExtensionItem*>(b);
-          auto aCat = (aSep ? aSep->category():
-                       aItem ? aItem->category(): Extension::Category::None);
-          auto bCat = (bSep ? bSep->category():
-                       bItem ? bItem->category(): Extension::Category::None);
-          if (aCat < bCat)
-            return true;
-          else if (aCat == bCat) {
-            // There are no two separators with same category.
-            ASSERT(!(aSep && bSep));
+      extensionsList()->sortItems([](Widget* a, Widget* b) {
+        auto aSep = dynamic_cast<ExtensionCategorySeparator*>(a);
+        auto bSep = dynamic_cast<ExtensionCategorySeparator*>(b);
+        auto aItem = dynamic_cast<ExtensionItem*>(a);
+        auto bItem = dynamic_cast<ExtensionItem*>(b);
+        auto aCat = (aSep  ? aSep->category() :
+                     aItem ? aItem->category() :
+                             Extension::Category::None);
+        auto bCat = (bSep  ? bSep->category() :
+                     bItem ? bItem->category() :
+                             Extension::Category::None);
+        if (aCat < bCat)
+          return true;
+        else if (aCat == bCat) {
+          // There are no two separators with same category.
+          ASSERT(!(aSep && bSep));
 
-            if (aSep && !bSep)
-              return true;
-            else if (!aSep && bSep)
-              return false;
-            else
-              return (base::compare_filenames(a->text(), b->text()) < 0);
-          }
-          else
+          if (aSep && !bSep)
+            return true;
+          else if (!aSep && bSep)
             return false;
-        });
+          else
+            return (base::compare_filenames(a->text(), b->text()) < 0);
+        }
+        else
+          return false;
+      });
       extensionsList()->layout();
       extensionsList()->selectChild(item);
     }
@@ -1662,7 +2112,8 @@ private:
     }
   }
 
-  void onDisableExtension() {
+  void onDisableExtension()
+  {
     ExtensionItem* item = dynamic_cast<ExtensionItem*>(extensionsList()->getSelectedChild());
     if (item) {
       item->enable(!item->isEnabled());
@@ -1670,15 +2121,13 @@ private:
     }
   }
 
-  void onUninstallExtension() {
+  void onUninstallExtension()
+  {
     ExtensionItem* item = dynamic_cast<ExtensionItem*>(extensionsList()->getSelectedChild());
     if (!item)
       return;
 
-    if (ui::Alert::show(
-          fmt::format(
-            Strings::alerts_uninstall_extension_warning(),
-            item->text())) != 1)
+    if (ui::Alert::show(Strings::alerts_uninstall_extension_warning(item->text())) != 1)
       return;
 
     try {
@@ -1690,7 +2139,8 @@ private:
     }
   }
 
-  void deleteExtensionItem(ExtensionItem* item) {
+  void deleteExtensionItem(ExtensionItem* item)
+  {
     // Remove the item from the list
     extensionsList()->removeChild(item);
     updateCategoryVisibility();
@@ -1698,7 +2148,8 @@ private:
     item->deferDelete();
   }
 
-  ExtensionItem* getItemByExtension(Extension* ext) {
+  ExtensionItem* getItemByExtension(Extension* ext)
+  {
     for (auto child : extensionsList()->children()) {
       ExtensionItem* item = dynamic_cast<ExtensionItem*>(child);
       if (item && item->extension() == ext)
@@ -1707,13 +2158,22 @@ private:
     return nullptr;
   }
 
-  void onOpenExtensionFolder() {
+  void onOpenExtensionFolder()
+  {
     ExtensionItem* item = dynamic_cast<ExtensionItem*>(extensionsList()->getSelectedChild());
     if (item)
       item->openFolder();
   }
 
-  void onCursorColorType() {
+  void onCelFormatChange()
+  {
+    auto format = gen::CelContentFormat(celFormat()->getSelectedItemIndex());
+    celFormatWarning()->setVisible(format == gen::CelContentFormat::RAW_IMAGE);
+    layout();
+  }
+
+  void onCursorColorType()
+  {
     switch (cursorColorType()->getSelectedItemIndex()) {
       case 0:
         cursorColor()->setColor(app::Color::fromMask());
@@ -1727,7 +2187,8 @@ private:
     layout();
   }
 
-  void onResetTimelineSel() {
+  void onResetTimelineSel()
+  {
     keepSelection()->setSelected(m_pref.timeline.keepSelection.defaultValue());
     selectOnClick()->setSelected(m_pref.timeline.selectOnClick.defaultValue());
     selectOnClickWithKey()->setSelected(m_pref.timeline.selectOnClickWithKey.defaultValue());
@@ -1735,12 +2196,178 @@ private:
     dragAndDropFromEdges()->setSelected(m_pref.timeline.dragAndDropFromEdges.defaultValue());
   }
 
-  gfx::Rect gridBounds() const {
-    return gfx::Rect(gridX()->textInt(), gridY()->textInt(),
-                     gridW()->textInt(), gridH()->textInt());
+  void allWidgetsIn(Widget* root, WidgetsList& list)
+  {
+    const auto& children = root->children();
+    for (auto i = children.rbegin(); i != children.rend(); ++i) {
+      list.push_back(*i);
+      allWidgetsIn(*i, list);
+    }
   }
 
-  static std::string userThemeFolder() {
+  void savePreSearchState()
+  {
+    static bool everythingPreloaded = false;
+    if (!everythingPreloaded) {
+      // Do all the actions that would happen when switching sections for the first to ensure things
+      // like extensions are loaded and we can search them.
+      loadLanguages();
+      onChangeBgScope();
+      onChangeGridScope();
+      loadThemes();
+      loadExtensions();
+      everythingPreloaded = true;
+    }
+
+    WidgetsList allWidgets;
+    allWidgetsIn(this, allWidgets);
+    m_preSearchDisabledFlag.reserve(allWidgets.size());
+
+    // Using the flag instead of isEnabled() preserves the specific widget's state instead of trying
+    // to find a disabled parent, etc.
+    for (auto* widget : allWidgets) {
+      auto searchProp = widget->getProperty(SearchTextProperty::Name);
+      if (!searchProp)
+        widget->setProperty(std::make_shared<SearchTextProperty>(widget, tooltipManager()));
+
+      m_preSearchDisabledFlag.try_emplace(widget, widget->hasFlags(DISABLED));
+    }
+  }
+
+  void loadPreSearchState()
+  {
+    if (m_preSearchDisabledFlag.empty())
+      return;
+
+    for (auto [widget, hadDisabledFlag] : m_preSearchDisabledFlag) {
+      if (hadDisabledFlag)
+        widget->enableFlags(DISABLED);
+      else
+        widget->disableFlags(DISABLED);
+    }
+
+    for (auto* item : sectionListbox()->children())
+      item->setEnabled(true);
+
+    // Necessary since we're manually poking flags
+    invalidate();
+
+    m_preSearchDisabledFlag.clear();
+  }
+
+  void onSearch()
+  {
+    const std::string& lowerText = base::string_to_lower(search()->text());
+
+    if (lowerText.empty()) {
+      loadPreSearchState();
+      return;
+    }
+
+    if (m_preSearchDisabledFlag.empty())
+      savePreSearchState();
+
+    const MatchWords match(lowerText);
+    int newIndex = -1;
+    for (int i = 0; i < sectionListbox()->getItemsCount(); i++) {
+      auto* item = dynamic_cast<ListItem*>(sectionListbox()->at(i));
+      if (!item || item->type() == kSeparatorWidget)
+        continue;
+
+      auto* section = findChild(item->getValue().c_str());
+      if (!section)
+        continue;
+
+      WidgetsList sectionWidgets;
+      allWidgetsIn(section, sectionWidgets);
+
+      std::vector<Widget*> labelsWithBuddies;
+      bool activeSection = false;
+      for (auto* widget : sectionWidgets) {
+        // Ignore combo box items and hidden widgets (checking flag to avoid false positives with
+        // things in other sections), and any widgets disabled beforehand
+        if (widget->parent()->type() == kComboBoxWidget || widget->hasFlags(HIDDEN) ||
+            m_preSearchDisabledFlag[widget] == true)
+          continue;
+
+        const auto& property = std::static_pointer_cast<SearchTextProperty>(
+          widget->getProperty(SearchTextProperty::Name));
+        if (!property)
+          continue;
+
+        const auto& text = property->text();
+        if (text.empty())
+          continue;
+
+        bool highlight = match.word(text);
+        if (!highlight)
+          highlight = match.fuzzyWords(property->textWords(), 2);
+
+        widget->setEnabled(highlight);
+
+        if (widget->type() == kLabelWidget || widget->type() == kLinkLabelWidget) {
+          if (static_cast<Label*>(widget)->buddy())
+            labelsWithBuddies.push_back(widget);
+        }
+
+        if (highlight)
+          activeSection = true;
+      }
+
+      if (activeSection) {
+        for (auto* widget : labelsWithBuddies) {
+          auto* label = (static_cast<Label*>(widget));
+          auto* buddy = label->buddy();
+
+          if (label->isEnabled()) {
+            buddy->setEnabled(true);
+
+            // Special case to handle ButtonSet & rows
+            if (buddy->type() == kGridWidget || buddy->type() == kBoxWidget) {
+              for (auto* child : buddy->children())
+                child->setEnabled(true);
+            }
+          }
+          else {
+            bool isBuddyEnabled = buddy->isEnabled();
+            if (buddy->type() == kGridWidget || buddy->type() == kBoxWidget) {
+              isBuddyEnabled = false;
+              for (const auto* child : buddy->children()) {
+                if (child->isEnabled() && !child->hasFlags(HIDDEN) &&
+                    (!child->text().empty() || child->type() == kComboBoxWidget)) {
+                  // Any enabled direct child counts
+                  isBuddyEnabled = true;
+                  break;
+                }
+              }
+            }
+
+            label->setEnabled(isBuddyEnabled);
+          }
+        }
+      }
+      else {
+        // For matching the section exactly even when we have no matches inside eg. "Experimental"
+        activeSection = match(item->text());
+      }
+
+      item->setEnabled(activeSection);
+
+      if (activeSection && newIndex == -1)
+        newIndex = i;
+    }
+
+    if (newIndex >= 0 && !sectionListbox()->getSelectedChild()->isEnabled())
+      sectionListbox()->selectChild(sectionListbox()->at(newIndex));
+  }
+
+  gfx::Rect gridBounds() const
+  {
+    return gfx::Rect(gridX()->textInt(), gridY()->textInt(), gridW()->textInt(), gridH()->textInt());
+  }
+
+  static std::string userThemeFolder()
+  {
     ResourceFinder rf;
     rf.includeDataDir(skin::SkinTheme::kThemesFolderName);
 
@@ -1757,7 +2384,8 @@ private:
     return base::normalize_path(rf.defaultFilename());
   }
 
-  static base::paths themeFolders() {
+  static base::paths themeFolders()
+  {
     ResourceFinder rf;
     rf.includeDataDir(skin::SkinTheme::kThemesFolderName);
 
@@ -1767,7 +2395,20 @@ private:
     return paths;
   }
 
-  void updateCategoryVisibility() {
+  static base::paths getUserDirPaths(const base::paths& dirNames)
+  {
+    ResourceFinder rf;
+    for (auto& fn : dirNames)
+      rf.includeUserDir(fn.c_str());
+
+    base::paths paths;
+    while (rf.next())
+      paths.push_back(base::normalize_path(rf.filename()));
+    return paths;
+  }
+
+  void updateCategoryVisibility()
+  {
     bool visibleCategories[int(Extension::Category::Max)];
     for (auto& v : visibleCategories)
       v = false;
@@ -1782,29 +2423,65 @@ private:
     }
   }
 
-#ifdef _WIN32
-  void onTabletAPIChange() {
-    if (tabletApiWindowsPointer()->isSelected()) {
-      loadWintabDriver()->setSelected(false);
-      loadWintabDriver2()->setSelected(false);
+  // Function to determine if the input extension is the default theme
+  static bool isExtensionADuplicatedDefaultTheme(const Extension* e)
+  {
+    if (!e->isDefaultTheme())
+      return false;
+    auto userThemePaths = getUserDirPaths({ "extensions", skin::SkinTheme::kThemesFolderName });
+    for (auto& p : userThemePaths) {
+      // Has the user path (p) the same path of the extension (e->path())?
+      if (std::strncmp(e->path().c_str(), p.c_str(), p.size()) == 0)
+        return true;
     }
-    else if (tabletApiWintabSystem()->isSelected() ||
-             tabletApiWintabDirect()->isSelected()) {
-      loadWintabDriver()->setSelected(true);
-      loadWintabDriver2()->setSelected(true);
-    }
-  }
-  void onLoadWintabChange(bool state) {
-    loadWintabDriver()->setSelected(state);
-    loadWintabDriver2()->setSelected(state);
-    if (state)
-      tabletApiWintabSystem()->setSelected(true);
-    else
-      tabletApiWindowsPointer()->setSelected(true);
+    return false;
   }
 
-#endif // _WIN32
+#if LAF_WINDOWS
+  void onTabletAPIChange()
+  {
+    const bool pointerApi = tabletApiWindowsPointer()->isSelected();
+    windowsPointerOptions()->setVisible(pointerApi);
+    sectionTablet()->layout();
+  }
 
+  void checkIfExplorerProcNeedsRestart()
+  {
+    const bool changed = m_restartExplorerProc ||
+                         (windowsFileExplorerThumbnailsOptionsFromRegistry() !=
+                          windowsFileExplorerThumbnailsOptionsFromUI());
+
+    winRestartExplorerProc()->setVisible(changed);
+    sectionFileExplorer()->layout();
+  }
+
+  win::ThumbnailsOption windowsFileExplorerThumbnailsOptionsFromRegistry() const
+  {
+    return win::get_thumbnail_options("aseprite");
+  }
+
+  win::ThumbnailsOption windowsFileExplorerThumbnailsOptionsFromUI() const
+  {
+    win::ThumbnailsOption opts = windowsFileExplorerThumbnailsOptionsFromRegistry();
+    opts.enabled = winDisplayThumbnail()->isSelected();
+    opts.overlay = winDisplayLittleIcon()->isSelected();
+    return opts;
+  }
+
+  void onAssociateFileType()
+  {
+    const std::string& ext = getExtension(winFileTypeToAssociate());
+    // .ase and .aseprite files will be associated with "AsepriteFile"
+    if (ext == "ase" || ext == "aseprite") {
+      win::associate_file_type_with_asepritefile_class(ext);
+    }
+    else {
+      win::add_aseprite_to_open_with_file_type(ext);
+    }
+  }
+#endif // LAF_WINDOWS
+
+  os::SystemRef m_system;
   Context* m_context;
   Preferences& m_pref;
   DocumentPreferences& m_globPref;
@@ -1819,8 +2496,15 @@ private:
   std::vector<os::ColorSpaceRef> m_colorSpaces;
   std::string m_templateTextForDisplayCS;
   RgbMapAlgorithmSelector m_rgbmapAlgorithmSelector;
+  BestFitCriteriaSelector m_bestFitCriteriaSelector;
   ButtonSet* m_themeVars = nullptr;
   SamplingSelector* m_samplingSelector = nullptr;
+  text::FontRef m_font;
+  text::FontRef m_miniFont;
+  std::unordered_map<Widget*, bool> m_preSearchDisabledFlag;
+#if LAF_WINDOWS
+  bool m_restartExplorerProc = false;
+#endif // LAF_WINDOWS
 };
 
 class OptionsCommand : public Command {
@@ -1835,13 +2519,11 @@ private:
   std::string m_installExtensionFilename;
 };
 
-OptionsCommand::OptionsCommand()
-  : Command(CommandId::Options(), CmdUIOnlyFlag)
+OptionsCommand::OptionsCommand() : Command(CommandId::Options())
 {
   Preferences& preferences = Preferences::instance();
 
-  ui::MenuBar::setExpandOnMouseover(
-    preferences.general.expandMenubarOnMouseover());
+  ui::MenuBar::setExpandOnMouseover(preferences.general.expandMenubarOnMouseover());
 }
 
 void OptionsCommand::onLoadParams(const Params& params)
@@ -1859,15 +2541,14 @@ void OptionsCommand::onExecute(Context* context)
   // to call this function after window.openWindowInForeground(), so
   // the parent window of the alert will be our OptionsWindow (and not
   // the main window).
-  window.Open.connect(
-    [&]() {
-      if (!m_installExtensionFilename.empty()) {
-        if (!window.showDialogToInstallExtension(this->m_installExtensionFilename)) {
-          window.closeWindow(&window);
-          return;
-        }
+  window.Open.connect([&]() {
+    if (!m_installExtensionFilename.empty()) {
+      if (!window.showDialogToInstallExtension(this->m_installExtensionFilename)) {
+        window.closeWindow(&window);
+        return;
       }
-    });
+    }
+  });
 
   window.openWindowInForeground();
   if (window.ok())

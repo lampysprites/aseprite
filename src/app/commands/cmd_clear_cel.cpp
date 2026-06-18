@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -19,7 +19,6 @@
 #include "app/ui/status_bar.h"
 #include "doc/cel.h"
 #include "doc/layer.h"
-#include "doc/sprite.h"
 
 namespace app {
 
@@ -32,8 +31,7 @@ protected:
   void onExecute(Context* context) override;
 };
 
-ClearCelCommand::ClearCelCommand()
-  : Command(CommandId::ClearCel(), CmdRecordableFlag)
+ClearCelCommand::ClearCelCommand() : Command(CommandId::ClearCel())
 {
 }
 
@@ -50,20 +48,15 @@ void ClearCelCommand::onExecute(Context* context)
   {
     Tx tx(writer, "Clear Cel");
 
-    const Site* site = writer.site();
-    if (site->inTimeline() &&
-        !site->selectedLayers().empty() &&
-        !site->selectedFrames().empty()) {
-      for (Layer* layer : site->selectedLayers()) {
-        if (!layer->isImage())
-          continue;
-
+    const Site& site = writer.site();
+    if (site.inTimeline() && !site.selectedLayers().empty() && !site.selectedFrames().empty()) {
+      for (Layer* layer : site.selectedLayers()) {
         if (!layer->isEditableHierarchy()) {
           nonEditableLayers = true;
           continue;
         }
 
-        for (frame_t frame : site->selectedFrames().reversed()) {
+        for (frame_t frame : site.selectedFrames().reversed()) {
           if (Cel* cel = layer->cel(frame))
             document->getApi(tx).clearCel(cel);
         }
@@ -79,9 +72,8 @@ void ClearCelCommand::onExecute(Context* context)
     tx.commit();
   }
 
-  if (nonEditableLayers)
-    StatusBar::instance()->showTip(1000,
-      Strings::statusbar_tips_locked_layers());
+  if (context->isUIAvailable() && nonEditableLayers)
+    StatusBar::instance()->showTip(1000, Strings::statusbar_tips_locked_layers());
 
   update_screen_for_document(document);
 }

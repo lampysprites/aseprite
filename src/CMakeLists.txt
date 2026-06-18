@@ -1,5 +1,5 @@
 # Aseprite
-# Copyright (C) 2019-2024  Igara Studio S.A.
+# Copyright (C) 2019-present  Igara Studio S.A.
 # Copyright (C) 2001-2018  David Capello
 
 ######################################################################
@@ -16,24 +16,13 @@ endif()
 if(MSVC)
   # As Skia is compiled with /GL flag (whole program optimization),
   # the linker prefer a /LTCG parameter to improve link times.
-  if(LAF_OS_BACKEND STREQUAL "skia")
+  if(LAF_BACKEND STREQUAL "skia")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /LTCG")
   endif()
-
-  add_definitions(-D_SCL_SECURE_NO_WARNINGS)
-  add_definitions(-wd4267) # disable warnings about signed/unsigned comparison
-  add_definitions(-wd4244) # disable warnings about possible loss of data
 else()
-  # disable warnings about signed/unsigned comparison
+  # Disable warnings about signed/unsigned comparison.
+  # TODO we should remove this (or move it to laf-base)
   add_definitions(-Wno-sign-compare)
-endif()
-
-if(ENABLE_NEWS)
-  add_definitions(-DENABLE_NEWS)
-endif()
-
-if(ENABLE_UPDATER)
-  add_definitions(-DENABLE_UPDATER)
 endif()
 
 if(WIN32)
@@ -49,53 +38,11 @@ if(REQUIRE_CURL AND NOT USE_SHARED_CURL AND CURL_STATICLIB)
 endif()
 
 ######################################################################
-# Special versions (full/trial, devmode, UI/CLI, etc.)
-
-if(NOT ENABLE_TRIAL_MODE)
-  add_definitions(-DENABLE_SAVE)
-else()
-  add_definitions(-DENABLE_TRIAL_MODE)
-endif()
-
-if(ENABLE_DRM)
-  add_definitions(-DENABLE_DRM)
-  add_definitions(-DENABLE_SAVE)
-endif()
-
-if(ENABLE_DEVMODE)
-  add_definitions(-DENABLE_DEVMODE)
-endif()
-
-if(ENABLE_UI)
-  add_definitions(-DENABLE_UI)
-endif()
-
-if(ENABLE_UI AND (NOT ENABLE_TRIAL_MODE OR ENABLE_DRM))
-  set(ENABLE_DATA_RECOVERY on)
-  add_definitions(-DENABLE_DATA_RECOVERY)
-else()
-  set(ENABLE_DATA_RECOVERY off)
-endif()
-
-if(ENABLE_SCRIPTING)
-  # Needed for "app" and "main"
-  add_definitions(-DENABLE_SCRIPTING)
-endif()
-
-if(ENABLE_WEBSOCKET)
-  # Needed for "app" and "main"
-  add_definitions(-DENABLE_WEBSOCKET)
-endif()
-
-if(ENABLE_FFI)
-  add_definitions(-DENABLE_FFI)
-endif()
-
-######################################################################
 # Aseprite Libraries (in preferred order to be built)
 
 # Disable observable tests
 set(OBSERVABLE_TESTS OFF CACHE BOOL "Compile observable tests")
+set(OBSERVABLE_FAST_LIST ON CACHE BOOL "Use fast list (non-thread safe) instead of safe (thread-safe) one by default")
 add_subdirectory(observable)
 include_directories(observable)
 
@@ -105,6 +52,7 @@ add_subdirectory(undo)
 
 add_subdirectory(cfg)
 add_subdirectory(doc)
+add_subdirectory(view)
 add_subdirectory(filters)
 add_subdirectory(fixmath)
 add_subdirectory(flic)
@@ -121,6 +69,10 @@ if(REQUIRE_CURL)
   add_subdirectory(net)
 endif()
 
+# We need the updater library to check for updates (when
+# ENABLE_UPDATER) or for the app.os object (ENABLE_SCRIPTING).
+add_subdirectory(updater)
+
 if(GEN_EXE)
   add_executable(gen IMPORTED)
   set_target_properties(gen PROPERTIES IMPORTED_LOCATION ${GEN_EXE})
@@ -129,10 +81,6 @@ else()
   add_subdirectory(gen)
   set(GEN_EXE ${CMAKE_BINARY_DIR}/bin/gen)
   set(GEN_DEP gen)
-endif()
-
-if(ENABLE_UPDATER)
-  add_subdirectory(updater)
 endif()
 
 if(ENABLE_STEAM)
@@ -148,26 +96,34 @@ add_subdirectory(app)
 ######################################################################
 # Output bin/data/ directory where we are going to copy data files
 
-set(DATA_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/data)
+set(ORIGINAL_DATA_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/data)
+if(ENABLE_ASEPRITE_EXE AND APPLE)
+  set(DATA_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/Aseprite.app/Contents/Resources/data)
+else()
+  set(DATA_OUTPUT_DIR ${ORIGINAL_DATA_OUTPUT_DIR})
+endif()
 
 ######################################################################
 # Clone "strings" repo with translations into bin/data/strings.git
 
-include(FetchContent)
-
-find_package(Git)
-if(GIT_FOUND)
-  FetchContent_Declare(
-    clone_strings
-    GIT_REPOSITORY    https://github.com/aseprite/strings.git
-    GIT_TAG           origin/main
-    SOURCE_DIR        ${DATA_OUTPUT_DIR}/strings.git
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND     ""
-    INSTALL_COMMAND   ""
-    TEST_COMMAND      "")
-  FetchContent_MakeAvailable(clone_strings)
-  add_custom_target(clone_strings DEPENDS clone_strings)
+if(ENABLE_I18N_STRINGS)
+  include(FetchContent)
+  find_package(Git)
+  if(GIT_FOUND)
+    FetchContent_Declare(
+      clone_strings
+      GIT_REPOSITORY    https://github.com/aseprite/strings.git
+      GIT_TAG           origin/main
+      SOURCE_DIR        ${DATA_OUTPUT_DIR}/strings.git
+      CONFIGURE_COMMAND ""
+      BUILD_COMMAND     ""
+      INSTALL_COMMAND   ""
+      TEST_COMMAND      "")
+    FetchContent_MakeAvailable(clone_strings)
+    add_custom_target(clone_strings DEPENDS clone_strings)
+  else()
+    add_custom_target(clone_strings)
+  endif()
 else()
   add_custom_target(clone_strings)
 endif()
@@ -185,7 +141,7 @@ foreach(fn ${src_data_files})
   list(APPEND out_data_files ${DATA_OUTPUT_DIR}/${fn})
 endforeach()
 
-if(GIT_FOUND)
+if(ENABLE_I18N_STRINGS AND GIT_FOUND)
   # Copy original en.ini to strings.git/en.ini to keep it updated. We
   # have to manually sync the "en.ini" file in the "strings" repo from
   # the "aseprite" repo.
@@ -201,6 +157,12 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/../README.md ${DATA_OUTPUT_DIR}/README.md
   MAIN_DEPENDENCY ${CMAKE_CURRENT_SOURCE_DIR}/../README.md)
 list(APPEND out_data_files ${DATA_OUTPUT_DIR}/README.md)
+
+add_custom_command(
+  OUTPUT ${DATA_OUTPUT_DIR}/AUTHORS.md
+  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/../AUTHORS.md ${DATA_OUTPUT_DIR}/AUTHORS.md
+  MAIN_DEPENDENCY ${CMAKE_CURRENT_SOURCE_DIR}/../AUTHORS.md)
+list(APPEND out_data_files ${DATA_OUTPUT_DIR}/AUTHORS.md)
 
 add_custom_command(
   OUTPUT ${DATA_OUTPUT_DIR}/EULA.txt
@@ -220,33 +182,59 @@ add_custom_target(copy_data DEPENDS clone_strings ${out_data_files})
 # Aseprite application
 
 if(ENABLE_ASEPRITE_EXE)
-  set(main_target aseprite)
-
   if(WIN32)
     set(main_resources
-      main/resources_win32.rc
-      main/settings.manifest)
+      main/win/resources_win32.rc
+      main/win/settings.manifest)
   endif()
 
-  add_executable(${main_target}
+  set(BUNDLE_PARAM "")
+  set(INSTALL_OPT RUNTIME)
+  if(APPLE)
+    set(BUNDLE_PARAM MACOSX_BUNDLE)
+    set(INSTALL_OPT BUNDLE)
+  endif()
+
+  add_executable(aseprite ${BUNDLE_PARAM}
     main/main.cpp
     ${main_resources})
-  if(ENABLE_UI)
+  if(LAF_BACKEND STREQUAL "skia")
     if(WIN32)
-      set_target_properties(${main_target} PROPERTIES WIN32_EXECUTABLE true)
+      set_target_properties(aseprite PROPERTIES WIN32_EXECUTABLE true)
     endif()
   endif()
-  set_target_properties(${main_target} PROPERTIES LINK_FLAGS "${LAF_BACKEND_LINK_FLAGS}")
-  target_link_libraries(${main_target} app-lib)
-  add_dependencies(${main_target} copy_data)
+  set_target_properties(aseprite PROPERTIES LINK_FLAGS "${LAF_BACKEND_LINK_FLAGS}")
+  if(APPLE)
+    set_target_properties(aseprite PROPERTIES
+      MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/main/osx/Info.plist")
 
-  if(LAF_OS_BACKEND_LINK_FLAGS)
-    set_target_properties(${main_target} PROPERTIES LINK_FLAGS
-      ${LAF_OS_BACKEND_LINK_FLAGS})
+    # As the output now is inside the Aseprite.app bundle, we generate
+    # a symlink to replace the old bin/aseprite binary and run the
+    # binary inside the .app bundle.
+    add_custom_command(
+      TARGET aseprite POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_BINARY_DIR}/bin/Aseprite.app/Contents/MacOS/aseprite" "${CMAKE_BINARY_DIR}/bin/aseprite")
+
+    # Create a bin/data link to bin/Aseprite.app/Contents/Resources/data
+    # so tests can load the data too (as tests aren't linked inside the
+    # app bundle)
+    if(IS_DIRECTORY "${ORIGINAL_DATA_OUTPUT_DIR}" AND
+       NOT IS_SYMLINK "${ORIGINAL_DATA_OUTPUT_DIR}")
+      file(RENAME "${ORIGINAL_DATA_OUTPUT_DIR}" "${ORIGINAL_DATA_OUTPUT_DIR}-deprecated")
+    endif()
+    file(MAKE_DIRECTORY "${DATA_OUTPUT_DIR}")
+    file(CREATE_LINK "${DATA_OUTPUT_DIR}" "${ORIGINAL_DATA_OUTPUT_DIR}" SYMBOLIC)
+  endif()
+  target_link_libraries(aseprite app-lib)
+  add_dependencies(aseprite copy_data)
+
+  if(LAF_BACKEND_LINK_FLAGS)
+    set_target_properties(aseprite PROPERTIES LINK_FLAGS
+      ${LAF_BACKEND_LINK_FLAGS})
   endif()
 
-  install(TARGETS ${main_target}
-    RUNTIME DESTINATION bin)
+  install(TARGETS aseprite
+    ${INSTALL_OPT} DESTINATION bin)
 
   install(DIRECTORY ../data
     DESTINATION share/aseprite)
@@ -259,10 +247,12 @@ if(ENABLE_TESTS)
   include(FindTests)
   find_tests(doc doc-lib)
   find_tests(doc/algorithm doc-lib)
+  find_tests(view view-lib)
   find_tests(render render-lib)
   find_tests(ui ui-lib)
   find_tests(app/cli app-lib)
   find_tests(app/file app-lib)
+  find_tests(app/ui app-lib)
   find_tests(app app-lib)
   find_tests(. app-lib)
 endif()
@@ -273,4 +263,5 @@ if(ENABLE_BENCHMARKS)
   find_benchmarks(doc doc-lib)
   find_benchmarks(doc/algorithm doc-lib)
   find_benchmarks(render render-lib)
+  find_benchmarks(ui ui-lib)
 endif()

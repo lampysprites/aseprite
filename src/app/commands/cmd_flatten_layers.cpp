@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019 Igara Studio S.A.
+// Copyright (C) 2019-2023  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/cmd/flatten_layers.h"
@@ -15,9 +15,9 @@
 #include "app/doc_range.h"
 #include "app/i18n/strings.h"
 #include "app/modules/gui.h"
+#include "app/pref/preferences.h"
 #include "app/tx.h"
 #include "app/ui/color_bar.h"
-#include "app/ui/timeline/timeline.h"
 #include "doc/layer.h"
 #include "doc/sprite.h"
 
@@ -36,8 +36,7 @@ protected:
   bool m_visibleOnly;
 };
 
-FlattenLayersCommand::FlattenLayersCommand()
-  : Command(CommandId::FlattenLayers(), CmdUIOnlyFlag)
+FlattenLayersCommand::FlattenLayersCommand() : Command(CommandId::FlattenLayers())
 {
   m_visibleOnly = false;
 }
@@ -55,12 +54,12 @@ bool FlattenLayersCommand::onEnabled(Context* context)
 void FlattenLayersCommand::onExecute(Context* context)
 {
   ContextWriter writer(context);
-  Sprite* sprite = writer.sprite();
+  const Site& site = writer.site();
+  Sprite* sprite = site.sprite();
   {
     Tx tx(writer, "Flatten Layers");
 
-    // TODO the range of selected layers should be in app::Site.
-    DocRange range;
+    view::Range range;
 
     if (m_visibleOnly) {
       for (auto layer : sprite->root()->layers())
@@ -68,30 +67,24 @@ void FlattenLayersCommand::onExecute(Context* context)
           range.selectLayer(layer);
     }
     else {
-#ifdef ENABLE_UI
-      if (context->isUIAvailable())
-        range = App::instance()->timeline()->range();
-#endif
+      range = site.range();
 
       // If the range is not selected or we have only one image layer
       // selected, we'll flatten all layers.
       if (!range.enabled() ||
-          (range.selectedLayers().size() == 1 &&
-           (*range.selectedLayers().begin())->isImage())) {
+          (range.selectedLayers().size() == 1 && (*range.selectedLayers().begin())->isImage())) {
         for (auto layer : sprite->root()->layers())
           range.selectLayer(layer);
       }
     }
     const bool newBlend = Preferences::instance().experimental.newBlend();
-    tx(new cmd::FlattenLayers(sprite,
-                              range.selectedLayers(),
-                              newBlend));
+    cmd::FlattenLayers::Options options;
+    options.newBlendMethod = newBlend;
+    tx(new cmd::FlattenLayers(sprite, range.selectedLayers(), options));
     tx.commit();
   }
 
-#ifdef ENABLE_UI
   update_screen_for_document(writer.document());
-#endif
 }
 
 std::string FlattenLayersCommand::onGetFriendlyName() const

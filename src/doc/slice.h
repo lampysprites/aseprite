@@ -1,5 +1,5 @@
 // Aseprite Document Library
-// Copyright (C) 2019-2020  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2017  David Capello
 //
 // This file is released under the terms of the MIT license.
@@ -12,86 +12,99 @@
 #include "doc/frame.h"
 #include "doc/keyframes.h"
 #include "doc/with_user_data.h"
+#include "gfx/border.h"
 #include "gfx/point.h"
 #include "gfx/rect.h"
 
 #include <string>
 
 namespace doc {
-  class Slices;
-  class Sprite;
+class Slices;
+class Sprite;
 
-  class SliceKey {
-  public:
-    static const gfx::Point NoPivot;
+class SliceKey {
+public:
+  static const gfx::Point NoPivot;
 
-    SliceKey();
-    SliceKey(const gfx::Rect& bounds,
-             const gfx::Rect& center = gfx::Rect(),
-             const gfx::Point& pivot = SliceKey::NoPivot);
+  SliceKey();
+  SliceKey(const gfx::Rect& bounds,
+           const gfx::Rect& center = gfx::Rect(),
+           const gfx::Point& pivot = SliceKey::NoPivot);
 
-    bool isEmpty() const { return m_bounds.isEmpty(); }
-    bool hasCenter() const { return !m_center.isEmpty(); }
-    bool hasPivot() const { return m_pivot != NoPivot; }
+  bool isEmpty() const { return m_bounds.isEmpty(); }
+  bool hasCenter() const { return !m_center.isEmpty(); }
+  bool hasPivot() const { return m_pivot != NoPivot; }
 
-    const gfx::Rect& bounds() const { return m_bounds; }
-    const gfx::Rect& center() const { return m_center; }
-    const gfx::Point& pivot() const { return m_pivot; }
+  const gfx::Rect& bounds() const { return m_bounds; }
+  const gfx::Rect& center() const { return m_center; }
+  const gfx::Point& pivot() const { return m_pivot; }
 
-    void setBounds(const gfx::Rect& bounds) { m_bounds = bounds; }
-    void setCenter(const gfx::Rect& center) { m_center = center; }
-    void setPivot(const gfx::Point& pivot) { m_pivot = pivot; }
+  void setBounds(const gfx::Rect& bounds) { m_bounds = bounds; }
+  void setCenter(const gfx::Rect& center) { m_center = center; }
+  void setPivot(const gfx::Point& pivot) { m_pivot = pivot; }
+  void setBorder(const gfx::Border& border)
+  {
+    m_center.x = border.left();
+    m_center.y = border.top();
+    m_center.w = m_bounds.w - border.width();
+    m_center.h = m_bounds.h - border.height();
+  }
 
-  private:
-    gfx::Rect m_bounds;
-    gfx::Rect m_center;
-    gfx::Point m_pivot;
-  };
+  bool operator==(const SliceKey& other) const
+  {
+    return (m_bounds == other.m_bounds && m_center == other.m_center && m_pivot == other.m_pivot);
+  }
 
-  class Slice : public WithUserData {
-  public:
-    typedef Keyframes<SliceKey> List;
-    typedef List::iterator iterator;
-    typedef List::const_iterator const_iterator;
+  bool operator!=(const SliceKey& other) const { return !operator==(other); }
 
-    Slice();
-    Slice(const Slice& other);
-    ~Slice();
+private:
+  gfx::Rect m_bounds;
+  gfx::Rect m_center;
+  gfx::Point m_pivot;
+};
 
-    int getMemSize() const override;
+class Slice : public WithUserData {
+public:
+  typedef Keyframes<SliceKey> List;
+  typedef List::iterator iterator;
+  typedef List::const_iterator const_iterator;
 
-    void insert(const frame_t frame, const SliceKey& key);
-    void remove(const frame_t frame);
+  Slice();
+  Slice(const Slice& other);
+  ~Slice();
 
-    const SliceKey* getByFrame(const frame_t frame) const;
-    iterator getIteratorByFrame(const frame_t frame) const;
+  int getMemSize() const override;
 
-    iterator begin() { return m_keys.begin(); }
-    iterator end() { return m_keys.end(); }
-    const_iterator begin() const { return m_keys.begin(); }
-    const_iterator end() const { return m_keys.end(); }
+  void insert(const frame_t frame, const SliceKey& key);
+  void remove(const frame_t frame);
 
-    std::size_t size() const { return m_keys.size(); }
-    bool empty() const { return m_keys.empty(); }
+  const SliceKey* getByFrame(const frame_t frame) const;
+  iterator getIteratorByFrame(const frame_t frame) const;
 
-    Sprite* sprite() const;
-    Slices* owner() const { return m_owner; }
-    frame_t fromFrame() const { return m_keys.fromFrame(); }
-    frame_t toFrame() const { return m_keys.toFrame(); }
-    const std::string& name() const { return m_name; }
+  iterator begin() { return m_keys.begin(); }
+  iterator end() { return m_keys.end(); }
+  const_iterator begin() const { return m_keys.begin(); }
+  const_iterator end() const { return m_keys.end(); }
 
-    void setOwner(Slices* owner);
-    void setName(const std::string& name);
+  std::size_t size() const { return m_keys.size(); }
+  bool empty() const { return m_keys.empty(); }
 
-    List::Range range(const frame_t from, const frame_t to) {
-      return m_keys.range(from, to);
-    }
+  Sprite* sprite() const;
+  Slices* owner() const { return m_owner; }
+  frame_t fromFrame() const { return m_keys.fromFrame(); }
+  frame_t toFrame() const { return m_keys.toFrame(); }
+  const std::string& name() const { return m_name; }
 
-  private:
-    Slices* m_owner;
-    std::string m_name;
-    List m_keys;
-  };
+  void setOwner(Slices* owner);
+  void setName(const std::string& name);
+
+  List::Range range(const frame_t from, const frame_t to) { return m_keys.range(from, to); }
+
+private:
+  Slices* m_owner;
+  std::string m_name;
+  List m_keys;
+};
 
 } // namespace doc
 

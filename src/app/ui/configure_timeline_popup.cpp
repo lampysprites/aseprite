@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2020-2021  Igara Studio S.A.
+// Copyright (C) 2020-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/ui/configure_timeline_popup.h"
@@ -20,6 +20,7 @@
 #include "app/load_widget.h"
 #include "app/loop_tag.h"
 #include "app/transaction.h"
+#include "app/ui/dock.h"
 #include "app/ui/main_window.h"
 #include "app/ui/timeline/timeline.h"
 #include "app/ui_context.h"
@@ -48,31 +49,35 @@ ConfigureTimelinePopup::ConfigureTimelinePopup()
   setHotRegion(gfx::Region(manager()->bounds())); // for the color selector
 
   setAutoRemap(false);
-  setBorder(gfx::Border(4*guiscale()));
+  setBorder(gfx::Border(4 * guiscale()));
 
   m_box = new app::gen::TimelineConf();
   addChild(m_box);
 
-  m_box->position()->ItemChange.connect([this]{ onChangePosition(); });
-  m_box->firstFrame()->Change.connect([this]{ onChangeFirstFrame(); });
-  m_box->merge()->Click.connect([this]{ onChangeType(); });
-  m_box->tint()->Click.connect([this]{ onChangeType(); });
-  m_box->opacity()->Change.connect([this]{ onOpacity(); });
-  m_box->opacityStep()->Change.connect([this]{ onOpacityStep(); });
-  m_box->resetOnionskin()->Click.connect([this]{ onResetOnionskin(); });
-  m_box->loopTag()->Click.connect([this]{ onLoopTagChange(); });
-  m_box->currentLayer()->Click.connect([this]{ onCurrentLayerChange(); });
-  m_box->behind()->Click.connect([this]{ onPositionChange(); });
-  m_box->infront()->Click.connect([this]{ onPositionChange(); });
+  m_box->position()->ItemChange.connect(
+    [this] { onChangeTimelinePosition(m_box->position()->selectedItem()); });
+  m_box->firstFrame()->Change.connect([this] { onChangeFirstFrame(); });
+  m_box->merge()->Click.connect([this] { onChangeType(); });
+  m_box->tint()->Click.connect([this] { onChangeType(); });
+  m_box->opacity()->Change.connect([this] { onOpacity(); });
+  m_box->opacityStep()->Change.connect([this] { onOpacityStep(); });
+  m_box->resetOnionskin()->Click.connect([this] { onResetOnionskin(); });
+  m_box->loopTag()->Click.connect([this] { onLoopTagChange(); });
+  m_box->currentLayer()->Click.connect([this] { onCurrentLayerChange(); });
+  m_box->behind()->Click.connect([this] { onPositionChange(); });
+  m_box->infront()->Click.connect([this] { onPositionChange(); });
 
-  m_box->zoom()->Change.connect([this]{ onZoomChange(); });
-  m_box->thumbEnabled()->Click.connect([this]{ onThumbEnabledChange(); });
-  m_box->thumbOverlayEnabled()->Click.connect([this]{ onThumbOverlayEnabledChange(); });
-  m_box->thumbOverlaySize()->Change.connect([this]{ onThumbOverlaySizeChange(); });
+  m_box->zoom()->Change.connect([this] { onZoomChange(); });
+  m_box->thumbEnabled()->Click.connect([this] { onThumbEnabledChange(); });
+  m_box->thumbOverlayEnabled()->Click.connect([this] { onThumbOverlayEnabledChange(); });
+  m_box->thumbOverlaySize()->Change.connect([this] { onThumbOverlaySizeChange(); });
+  m_box->thumbScaleUpToFit()->Click.connect([this] { onScaleUpToFitChange(); });
 
   const bool visibleThumb = docPref().thumbnails.enabled();
   m_box->thumbHSeparator()->setVisible(visibleThumb);
   m_box->thumbBox()->setVisible(visibleThumb);
+
+  m_box->defaults()->Click.connect([this] { onSetAsDefaults(); });
 }
 
 Doc* ConfigureTimelinePopup::doc()
@@ -90,25 +95,20 @@ void ConfigureTimelinePopup::updateWidgetsFromCurrentSettings()
   DocumentPreferences& docPref = this->docPref();
   base::ScopedValue lockUpdates(m_lockUpdates, true);
 
-  auto position = Preferences::instance().general.timelinePosition();
-  int selItem = 2;
-  switch (position) {
-    case gen::TimelinePosition::LEFT: selItem = 0; break;
-    case gen::TimelinePosition::RIGHT: selItem = 1; break;
-    case gen::TimelinePosition::BOTTOM: selItem = 2; break;
+  int selItem = 3;
+  switch (Dock::GetSide(App::instance()->mainWindow()->getTimeline())) {
+    case ui::TOP:    selItem = 0; break;
+    case ui::LEFT:   selItem = 1; break;
+    case ui::RIGHT:  selItem = 2; break;
+    case ui::BOTTOM: selItem = 3; break;
   }
   m_box->position()->setSelectedItem(selItem, false);
 
-  m_box->firstFrame()->setTextf(
-    "%d", docPref.timeline.firstFrame());
+  m_box->firstFrame()->setTextf("%d", docPref.timeline.firstFrame());
 
   switch (docPref.onionskin.type()) {
-    case app::gen::OnionskinType::MERGE:
-      m_box->merge()->setSelected(true);
-      break;
-    case app::gen::OnionskinType::RED_BLUE_TINT:
-      m_box->tint()->setSelected(true);
-      break;
+    case app::gen::OnionskinType::MERGE:         m_box->merge()->setSelected(true); break;
+    case app::gen::OnionskinType::RED_BLUE_TINT: m_box->tint()->setSelected(true); break;
   }
   m_box->opacity()->setValue(docPref.onionskin.opacityBase());
   m_box->opacityStep()->setValue(docPref.onionskin.opacityStep());
@@ -116,21 +116,13 @@ void ConfigureTimelinePopup::updateWidgetsFromCurrentSettings()
   m_box->currentLayer()->setSelected(docPref.onionskin.currentLayer());
 
   switch (docPref.onionskin.type()) {
-    case app::gen::OnionskinType::MERGE:
-      m_box->merge()->setSelected(true);
-      break;
-    case app::gen::OnionskinType::RED_BLUE_TINT:
-      m_box->tint()->setSelected(true);
-      break;
+    case app::gen::OnionskinType::MERGE:         m_box->merge()->setSelected(true); break;
+    case app::gen::OnionskinType::RED_BLUE_TINT: m_box->tint()->setSelected(true); break;
   }
 
   switch (docPref.onionskin.position()) {
-    case render::OnionskinPosition::BEHIND:
-      m_box->behind()->setSelected(true);
-      break;
-    case render::OnionskinPosition::INFRONT:
-      m_box->infront()->setSelected(true);
-      break;
+    case render::OnionskinPosition::BEHIND:  m_box->behind()->setSelected(true); break;
+    case render::OnionskinPosition::INFRONT: m_box->infront()->setSelected(true); break;
   }
 
   const bool visibleThumb = docPref.thumbnails.enabled();
@@ -141,6 +133,7 @@ void ConfigureTimelinePopup::updateWidgetsFromCurrentSettings()
   m_box->thumbBox()->setVisible(visibleThumb);
   m_box->thumbOverlayEnabled()->setSelected(docPref.thumbnails.overlayEnabled());
   m_box->thumbOverlaySize()->setValue(docPref.thumbnails.overlaySize());
+  m_box->thumbScaleUpToFit()->setSelected(docPref.thumbnails.scaleUpToFit());
 
   expandWindow(sizeHint());
 }
@@ -148,7 +141,6 @@ void ConfigureTimelinePopup::updateWidgetsFromCurrentSettings()
 bool ConfigureTimelinePopup::onProcessMessage(ui::Message* msg)
 {
   switch (msg->type()) {
-
     case kOpenMessage: {
       updateWidgetsFromCurrentSettings();
       break;
@@ -157,24 +149,21 @@ bool ConfigureTimelinePopup::onProcessMessage(ui::Message* msg)
   return PopupWindow::onProcessMessage(msg);
 }
 
-void ConfigureTimelinePopup::onChangePosition()
+void ConfigureTimelinePopup::onChangeTimelinePosition(const int option)
 {
-  gen::TimelinePosition newTimelinePos =
-    gen::TimelinePosition::BOTTOM;
-
-  int selITem = m_box->position()->selectedItem();
-  switch (selITem) {
-    case 0: newTimelinePos = gen::TimelinePosition::LEFT; break;
-    case 1: newTimelinePos = gen::TimelinePosition::RIGHT; break;
-    case 2: newTimelinePos = gen::TimelinePosition::BOTTOM; break;
+  int align = ui::BOTTOM;
+  switch (option) {
+    case 0: align = ui::TOP; break;
+    case 1: align = ui::LEFT; break;
+    case 2: align = ui::RIGHT; break;
+    case 3: align = ui::BOTTOM; break;
   }
-  Preferences::instance().general.timelinePosition(newTimelinePos);
+  Dock::SetSide(App::instance()->mainWindow()->getTimeline(), align);
 }
 
 void ConfigureTimelinePopup::onChangeFirstFrame()
 {
-  docPref().timeline.firstFrame(
-    m_box->firstFrame()->textInt());
+  docPref().timeline.firstFrame(m_box->firstFrame()->textInt());
 }
 
 void ConfigureTimelinePopup::onChangeType()
@@ -182,9 +171,8 @@ void ConfigureTimelinePopup::onChangeType()
   if (m_lockUpdates)
     return;
 
-  docPref().onionskin.type(m_box->merge()->isSelected() ?
-    app::gen::OnionskinType::MERGE:
-    app::gen::OnionskinType::RED_BLUE_TINT);
+  docPref().onionskin.type(m_box->merge()->isSelected() ? app::gen::OnionskinType::MERGE :
+                                                          app::gen::OnionskinType::RED_BLUE_TINT);
 }
 
 void ConfigureTimelinePopup::onOpacity()
@@ -229,9 +217,8 @@ void ConfigureTimelinePopup::onCurrentLayerChange()
 
 void ConfigureTimelinePopup::onPositionChange()
 {
-  docPref().onionskin.position(m_box->behind()->isSelected() ?
-                               render::OnionskinPosition::BEHIND:
-                               render::OnionskinPosition::INFRONT);
+  docPref().onionskin.position(m_box->behind()->isSelected() ? render::OnionskinPosition::BEHIND :
+                                                               render::OnionskinPosition::INFRONT);
 }
 
 void ConfigureTimelinePopup::onZoomChange()
@@ -253,6 +240,35 @@ void ConfigureTimelinePopup::onThumbOverlayEnabledChange()
 void ConfigureTimelinePopup::onThumbOverlaySizeChange()
 {
   docPref().thumbnails.overlaySize(m_box->thumbOverlaySize()->getValue());
+}
+
+void ConfigureTimelinePopup::onScaleUpToFitChange()
+{
+  docPref().thumbnails.scaleUpToFit(m_box->thumbScaleUpToFit()->isSelected());
+}
+
+void ConfigureTimelinePopup::onSetAsDefaults()
+{
+  const auto& docPref = this->docPref();
+  auto& defaults = Preferences::instance().document(nullptr);
+
+  defaults.timeline.firstFrame(docPref.timeline.firstFrame());
+
+  defaults.thumbnails.enabled(docPref.thumbnails.enabled());
+  defaults.thumbnails.zoom(docPref.thumbnails.zoom());
+  defaults.thumbnails.overlayEnabled(docPref.thumbnails.overlayEnabled());
+  defaults.thumbnails.overlaySize(docPref.thumbnails.overlaySize());
+  defaults.thumbnails.scaleUpToFit(docPref.thumbnails.scaleUpToFit());
+
+  defaults.onionskin.active(docPref.onionskin.active());
+  defaults.onionskin.prevFrames(docPref.onionskin.prevFrames());
+  defaults.onionskin.nextFrames(docPref.onionskin.nextFrames());
+  defaults.onionskin.opacityBase(docPref.onionskin.opacityBase());
+  defaults.onionskin.opacityStep(docPref.onionskin.opacityStep());
+  defaults.onionskin.type(docPref.onionskin.type());
+  defaults.onionskin.loopTag(docPref.onionskin.loopTag());
+  defaults.onionskin.currentLayer(docPref.onionskin.currentLayer());
+  defaults.onionskin.position(docPref.onionskin.position());
 }
 
 } // namespace app

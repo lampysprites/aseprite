@@ -1,12 +1,12 @@
 // Aseprite Document Library
-// Copyright (c) 2023 Igara Studio S.A.
+// Copyright (c) 2023-2026 Igara Studio S.A.
 // Copyright (c) 2001-2018 David Capello
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "doc/cel_io.h"
@@ -27,7 +27,7 @@ void write_cel(std::ostream& os, const Cel* cel)
 {
   write32(os, cel->id());
   write16(os, cel->frame());
-  write32(os, cel->dataRef()->id());
+  write32(os, cel->dataId());
   write16(os, uint16_t(int16_t(cel->zIndex())));
 }
 
@@ -40,9 +40,12 @@ Cel* read_cel(std::istream& is, SubObjectsIO* subObjects, bool setId)
   if (is.eof())
     zIndex = 0;
 
-  CelDataRef celData(subObjects->getCelDataRef(celDataId));
-  if (!celData)
-    return nullptr;
+  CelDataRef celData;
+  if (celDataId) {
+    celData = subObjects->getCelDataRef(celDataId);
+    if (!celData)
+      return nullptr;
+  }
 
   auto cel = std::make_unique<Cel>(frame, celData);
   cel->setZIndex(zIndex);
@@ -51,4 +54,4 @@ Cel* read_cel(std::istream& is, SubObjectsIO* subObjects, bool setId)
   return cel.release();
 }
 
-}
+} // namespace doc

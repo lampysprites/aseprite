@@ -5,7 +5,7 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -18,7 +18,6 @@
 #include "app/ui/status_bar.h"
 #include "doc/cel.h"
 #include "doc/layer.h"
-#include "doc/sprite.h"
 
 namespace app {
 
@@ -31,8 +30,7 @@ protected:
   void onExecute(Context* context) override;
 };
 
-LinkCelsCommand::LinkCelsCommand()
-  : Command(CommandId::LinkCels(), CmdRecordableFlag)
+LinkCelsCommand::LinkCelsCommand() : Command(CommandId::LinkCels())
 {
 }
 
@@ -40,8 +38,7 @@ bool LinkCelsCommand::onEnabled(Context* context)
 {
   if (context->checkFlags(ContextFlags::ActiveDocumentIsWritable)) {
     auto site = context->activeSite();
-    return (site.inTimeline() &&
-            site.selectedFrames().size() > 1);
+    return (site.inTimeline() && site.selectedFrames().size() > 1);
   }
   else
     return false;
@@ -70,17 +67,17 @@ void LinkCelsCommand::onExecute(Context* context)
 
       LayerImage* layerImage = static_cast<LayerImage*>(layer);
 
-      for (auto it=site.selectedFrames().begin(), end=site.selectedFrames().end();
-           it != end; ++it) {
+      for (auto it = site.selectedFrames().begin(), end = site.selectedFrames().end(); it != end;
+           ++it) {
         frame_t frame = *it;
         Cel* cel = layerImage->cel(frame);
         if (cel) {
           for (++it; it != end; ++it) {
-            tx(
-              new cmd::CopyCel(
-                layerImage, cel->frame(),
-                layerImage, *it,
-                true));         // true = force links
+            tx(new cmd::CopyCel(layerImage,
+                                cel->frame(),
+                                layerImage,
+                                *it,
+                                true)); // true = force links
           }
           break;
         }
@@ -90,9 +87,8 @@ void LinkCelsCommand::onExecute(Context* context)
     tx.commit();
   }
 
-  if (nonEditableLayers)
-    StatusBar::instance()->showTip(1000,
-      Strings::statusbar_tips_locked_layers());
+  if (context->isUIAvailable() && nonEditableLayers)
+    StatusBar::instance()->showTip(1000, Strings::statusbar_tips_locked_layers());
 
   update_screen_for_document(document);
 }

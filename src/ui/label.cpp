@@ -6,24 +6,106 @@
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
-#include "os/font.h"
+#include "ui/box.h"
+#include "ui/button.h"
+#include "ui/combobox.h"
 #include "ui/label.h"
+#include "ui/manager.h"
 #include "ui/message.h"
 #include "ui/size_hint_event.h"
 #include "ui/theme.h"
+#include "ui/window.h"
 
 namespace ui {
 
-Label::Label(const std::string& text)
-  : Widget(kLabelWidget)
+Label::Label(const std::string& text) : Widget(kLabelWidget), m_buddy(nullptr), m_buddySync(false)
 {
   enableFlags(IGNORE_MOUSE);
   setAlign(LEFT | MIDDLE);
   setText(text);
   initTheme();
+}
+
+Widget* Label::buddy()
+{
+  if (m_buddy || m_buddyId.empty())
+    return m_buddy;
+
+  // This can miss some cases where the hierarchy is not direct
+  Widget* search = parent();
+  do {
+    ASSERT(search);
+    if (!search)
+      break;
+
+    setBuddy(search->findChild(m_buddyId.c_str()));
+    search = search->parent();
+  } while (!m_buddy);
+
+  return m_buddy;
+}
+
+void Label::setBuddy(Widget* buddy)
+{
+  m_buddy = buddy;
+
+  if (m_buddy)
+    disableFlags(IGNORE_MOUSE);
+
+  refreshBuddySync();
+}
+
+void Label::setBuddy(const std::string& buddyId)
+{
+  m_buddy = nullptr;
+  m_buddyId = buddyId;
+
+  if (!m_buddyId.empty())
+    disableFlags(IGNORE_MOUSE);
+}
+
+bool Label::onProcessMessage(Message* msg)
+{
+  switch (msg->type()) {
+    case kMouseDownMessage:
+      auto* bud = buddy();
+      if (bud && bud->isVisible() && !bud->hasFocus()) {
+        if (bud->isEnabled() && (bud->type() == kGridWidget || bud->type() == kBoxWidget)) {
+          // Iterate through containers until we find something worth focusing
+          for (auto* child : bud->children()) {
+            if (child->isVisible() && child->isEnabled() && !child->hasFlags(IGNORE_MOUSE)) {
+              manager()->setFocus(child, FocusMessage::Source::Buddy);
+              return true;
+            }
+          }
+        }
+
+        manager()->setFocus(bud, FocusMessage::Source::Buddy);
+        return true;
+      }
+      break;
+  }
+
+  return Widget::onProcessMessage(msg);
+}
+
+void Label::onEnable(bool enabled)
+{
+  if (m_buddy && m_buddySync)
+    m_buddy->setEnabled(enabled);
+
+  Widget::onEnable(enabled);
+}
+
+void Label::refreshBuddySync()
+{
+  if (m_buddy && m_buddySync)
+    m_buddyEnabledConn = m_buddy->EnabledChange.connect([this](bool state) { setEnabled(state); });
+  else
+    m_buddyEnabledConn.disconnect();
 }
 
 } // namespace ui

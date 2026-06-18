@@ -6,7 +6,8 @@
   * [Windows dependencies](#windows-dependencies)
   * [macOS dependencies](#macos-dependencies)
   * [Linux dependencies](#linux-dependencies)
-* [Compiling](#compiling)
+* [Automatic Building](#automatic-building)
+* [Manual Building](#manual-building)
   * [Windows details](#windows-details)
     * [MinGW](#mingw)
   * [macOS details](#macos-details)
@@ -17,11 +18,12 @@
 # Platforms
 
 You should be able to compile Aseprite successfully on the following
-platforms:
+platforms (older and newer versions might work):
 
-* Windows 11 + [Visual Studio Community 2022 + Windows 10.0 SDK (the latest version available)](https://imgur.com/a/7zs51IT) (we don't support [MinGW](#mingw))
-* macOS 13.0.1 Ventura + Xcode 14.1 + macOS 11.3 SDK (older version might work)
-* Linux Ubuntu Bionic 18.04 + clang 10.0
+* Windows 11 + [Visual Studio Community 2022 + Windows 11 SDK](https://imgur.com/a/7zs51IT)
+  * *Important*: We don't support [MinGW](#mingw)
+* macOS 15.2 Sequoia + Xcode 16.3 + macOS 15.4 SDK
+* Linux Ubuntu Focal Fossa 20.04 + clang 12
 
 # Get the source code
 
@@ -49,9 +51,9 @@ clone the repository on Windows.
 
 To compile Aseprite you will need:
 
-* The latest version of [CMake](https://cmake.org) (3.16 or greater)
+* The latest version of [CMake](https://cmake.org)
 * [Ninja](https://ninja-build.org) build system
-* And a compiled version of the `aseprite-m102` branch of
+* And a compiled version of the `aseprite-m124` branch of
   the [Skia library](https://github.com/aseprite/skia#readme).
   There are [pre-built packages available](https://github.com/aseprite/skia/releases).
   You can get some extra information in
@@ -59,39 +61,49 @@ To compile Aseprite you will need:
 
 ## Windows dependencies
 
-* Windows 10 (we don't support cross-compiling)
+* Windows 11 (we don't support cross-compiling)
 * [Visual Studio Community 2022](https://visualstudio.microsoft.com/downloads/) (we don't support [MinGW](#mingw))
-* The [Desktop development with C++ item + Windows 10.0.18362.0 SDK](https://imgur.com/a/7zs51IT)
-  from the Visual Studio installer
+* The [Desktop development with C++ item + Windows 10.0.26100.0 SDK](https://imgur.com/a/7zs51IT)
+  from Visual Studio installer
 
 ## macOS dependencies
 
-On macOS you will need macOS 11.3 SDK and Xcode 13.1 (older versions
-might work).
+On macOS you will need macOS 15.4 SDK and Xcode 16.3 (older versions might work).
 
 ## Linux dependencies
 
 You will need the following dependencies on Ubuntu/Debian:
 
-    sudo apt-get install -y g++ clang libc++-dev libc++abi-dev cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
+    sudo apt-get install -y g++ clang cmake ninja-build libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev libfontconfig1-dev
 
-Or use clang-10 packages (or newer) in case that clang in your distribution is older than clang 10.0:
+Or use clang-12 packages (or newer) in case that clang in your distribution is older than clang 12.0:
 
-    sudo apt-get install -y clang-10 libc++-10-dev libc++abi-10-dev
+    sudo apt-get install -y clang-12
 
 On Fedora:
 
-    sudo dnf install -y gcc-c++ clang libcxx-devel cmake ninja-build libX11-devel libXcursor-devel libXi-devel mesa-libGL-devel fontconfig-devel
+    sudo dnf install -y gcc-c++ clang libcxx-devel cmake ninja-build libX11-devel libXcursor-devel libXi-devel libXrandr-devel mesa-libGL-devel fontconfig-devel
 
 On Arch:
 
-    sudo pacman -S gcc clang libc++ cmake ninja libx11 libxcursor mesa-libgl fontconfig
+    sudo pacman -S gcc clang cmake ninja libx11 libxcursor libxi libxrandr mesa-libgl fontconfig libwebp
 
 On SUSE:
 
-    sudo zypper install gcc-c++ clang libc++-devel libc++abi-devel cmake ninja libX11-devel libXcursor-devel libXi-devel Mesa-libGL-devel fontconfig-devel
+    sudo zypper install gcc-c++ clang cmake ninja libX11-devel libXcursor-devel libXi-devel libXrandr-devel Mesa-libGL-devel fontconfig-devel
 
-# Compiling
+# Automatic Building
+
+We offer a new [build script](build.sh) that automates and help you to
+compile Aseprite following instructions on screen. This will be the
+preferred method for new users and developers to compile Aseprite.
+
+After you get [get Aseprite code](#get-the-source-code) and install
+[its dependencies](#dependencies), you can run [build.cmd](build.cmd)
+file on Windows double-clicking it, or [build.sh](build.sh) on macOS or
+Linux running it from the terminal from the same Aseprite folder.
+
+# Manual Building
 
 1. [Get Aseprite code](#get-the-source-code), put it in a folder like
    `C:\aseprite`, and create a `build` directory inside to leave all
@@ -127,11 +139,16 @@ On SUSE:
 
 ## Windows details
 
-Open a command prompt window (`cmd.exe`) and call:
+Open a command prompt window with the VS 2022 tools. For this you can
+search for `x64 Native Tools Command Prompt for VS 2022` in the Start
+menu, or open a `cmd.exe` terminal and run:
 
     call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x64
 
-The command above is required while using the 64-bit version of skia. When compiling with the 32-bit version, it is possible to open a [developer command prompt](https://docs.microsoft.com/en-us/dotnet/framework/tools/developer-command-prompt-for-vs) instead.
+The command above is required while using the 64-bit version of
+Skia. When compiling with the 32-bit version, it is possible to open a
+[developer command prompt](https://docs.microsoft.com/en-us/dotnet/framework/tools/developer-command-prompt-for-vs)
+instead.
 
 And then
 
@@ -171,7 +188,7 @@ Run `cmake` with the following parameters and then `ninja`:
     cmake \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-      -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 \
+      -DCMAKE_OSX_DEPLOYMENT_TARGET=10.14 \
       -DCMAKE_OSX_SYSROOT=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk \
       -DLAF_BACKEND=skia \
       -DSKIA_DIR=$HOME/deps/skia \
@@ -190,7 +207,7 @@ but it could be different in your Mac.
 ### Apple Silicon
 
 If you running macOS on an ARM64/AArch64/Apple Silicon Mac (e.g. M1),
-you can compile a native ARM64 version of Aseprite following similar 
+you can compile a native ARM64 version of Aseprite following similar
 steps as above but when we call `cmake`, we have some differences:
 
     cd aseprite
@@ -208,7 +225,7 @@ steps as above but when we call `cmake`, we have some differences:
       -DPNG_ARM_NEON:STRING=on \
       -G Ninja \
       ..
-      ninja aseprite
+    ninja aseprite
 
 ### Issues with Retina displays
 
@@ -218,7 +235,9 @@ If you have a Retina display, check the following issue:
 
 ## Linux details
 
-You need to use clang and libc++ to compile Aseprite:
+You can compile Aseprite with gcc or clang. In case that you are using
+the [pre-compiled Skia version](https://github.com/aseprite/skia/releases/),
+you must use libstdc++ to compile Aseprite:
 
     cd aseprite
     mkdir build
@@ -227,8 +246,8 @@ You need to use clang and libc++ to compile Aseprite:
     export CXX=clang++
     cmake \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-      -DCMAKE_CXX_FLAGS:STRING=-stdlib=libc++ \
-      -DCMAKE_EXE_LINKER_FLAGS:STRING=-stdlib=libc++ \
+      -DCMAKE_CXX_FLAGS:STRING=-stdlib=libstdc++ \
+      -DCMAKE_EXE_LINKER_FLAGS:STRING=-stdlib=libstdc++ \
       -DLAF_BACKEND=skia \
       -DSKIA_DIR=$HOME/deps/skia \
       -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-x64 \
@@ -239,13 +258,6 @@ You need to use clang and libc++ to compile Aseprite:
 
 In this case, `$HOME/deps/skia` is the directory where Skia was
 compiled or uncompressed.
-
-### GCC compiler
-
-In case that you are using the pre-compiled Skia version, you must use
-the clang compiler and libc++ to compile Aseprite. Only if you compile
-Skia with GCC, you will be able to compile Aseprite with GCC, and this
-is not recommended as you will have a performance penalty doing so.
 
 # Using shared third party libraries
 

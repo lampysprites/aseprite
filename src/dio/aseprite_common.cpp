@@ -1,12 +1,12 @@
 // Aseprite Document IO Library
-// Copyright (c) 2018-2023 Igara Studio S.A.
+// Copyright (c) 2018-present Igara Studio S.A.
 // Copyright (c) 2001-2018 David Capello
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "dio/aseprite_common.h"
@@ -15,8 +15,7 @@
 
 namespace dio {
 
-uint32_t AsepriteExternalFiles::insert(const uint8_t type,
-                                       const std::string& filename)
+uint32_t AsepriteExternalFiles::insert(const uint8_t type, const std::string& filename)
 {
   auto it = m_toID[type].find(filename);
   if (it != m_toID[type].end())
@@ -27,11 +26,12 @@ uint32_t AsepriteExternalFiles::insert(const uint8_t type,
   }
 }
 
-void AsepriteExternalFiles::insert(uint32_t id,
-                                   const uint8_t type,
-                                   const std::string& filename)
+void AsepriteExternalFiles::insert(uint32_t id, const uint8_t type, const std::string& filename)
 {
-  ASSERT(type >= 0 && type < ASE_EXTERNAL_FILE_TYPES);
+  if (type >= ASE_EXTERNAL_FILE_TYPES) {
+    ASSERT(false && "Invalid external file type");
+    return;
+  }
 
   m_items[id] = Item{ filename, type };
   m_toID[type][filename] = id;
@@ -41,7 +41,10 @@ bool AsepriteExternalFiles::getIDByFilename(const uint8_t type,
                                             const std::string& fn,
                                             uint32_t& id) const
 {
-  ASSERT(type >= 0 && type < ASE_EXTERNAL_FILE_TYPES);
+  if (type >= ASE_EXTERNAL_FILE_TYPES) {
+    ASSERT(false && "Invalid external file type");
+    return false;
+  }
 
   auto it = m_toID[type].find(fn);
   if (it == m_toID[type].end())

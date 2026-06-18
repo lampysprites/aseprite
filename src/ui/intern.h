@@ -1,4 +1,5 @@
 // Aseprite UI Library
+// Copyright (C) 2024  Igara Studio S.A.
 // Copyright (C) 2001-2017  David Capello
 //
 // This file is released under the terms of the MIT license.
@@ -11,30 +12,26 @@
 #include "gfx/color.h"
 #include "ui/base.h"
 
-namespace os {
-  class Font;
-}
-
 namespace ui {
 
-  class Graphics;
-  class Widget;
-  class Window;
+class Graphics;
+class Widget;
+class Window;
 
-  // intern.cpp
+// intern.cpp
 
-  namespace details {
+namespace details {
 
-    void initWidgets();
-    void exitWidgets();
+void initWidgets();
+void exitWidgets();
 
-    void addWidget(Widget* widget);
-    void removeWidget(Widget* widget);
+void addWidget(Widget* widget);
+void removeWidget(Widget* widget);
 
-    void reinitThemeForAllWidgets();
-    int old_guiscale();
+void reinitThemeForAllWidgets();
+int old_guiscale();
 
-  } // namespace details
+} // namespace details
 
 } // namespace ui
 

@@ -1,5 +1,5 @@
 # Aseprite
-# Copyright (C) 2021-2024  Igara Studio S.A.
+# Copyright (C) 2021-2025  Igara Studio S.A.
 # Copyright (C) 2001-2018  David Capello
 
 include_directories(.)
@@ -8,15 +8,13 @@ if(MSVC)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 endif(MSVC)
 
-if(NOT USE_SHARED_JPEGLIB)
-  add_subdirectory(jpeg)
-endif()
-
 if(NOT USE_SHARED_ZLIB)
   set(SKIP_INSTALL_ALL on)
   # Don't build zlib tests
-  set(ZLIB_TESTS OFF CACHE BOOL "Build zlib tests")
+  set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "Enable Zlib Examples")
+  set(ZLIB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/zlib" CACHE INTERNAL "")
   add_subdirectory(zlib)
+  add_library(ZLIB::ZLIB ALIAS zlibstatic)
 endif()
 
 if(NOT USE_SHARED_LIBPNG)
@@ -54,23 +52,22 @@ if(ENABLE_WEBP AND NOT LAF_BACKEND STREQUAL "skia")
 endif()
 
 if(NOT USE_SHARED_TINYXML)
+  set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "Build tests for tinyxml2")
   add_subdirectory(tinyxml2)
+endif()
+
+if(NOT USE_SHARED_TINYEXIF)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "build as shared library")
+  set(BUILD_STATIC_LIBS ON CACHE BOOL "build as static library")
+  set(LINK_CRT_STATIC_LIBS OFF CACHE BOOL "link CRT static library")
+  set(BUILD_DEMO OFF CACHE BOOL "build demo binary")
+  add_subdirectory(TinyEXIF)
 endif()
 
 if(REQUIRE_CURL AND NOT USE_SHARED_CURL)
   set(BUILD_RELEASE_DEBUG_DIRS ON BOOL)
   set(BUILD_CURL_EXE OFF CACHE BOOL "Set to ON to build curl executable.")
-
-  # SSL/TLS support (use native libraries only)
-  set(CMAKE_USE_OPENSSL OFF CACHE BOOL "Use OpenSSL code. Experimental")
-  set(CMAKE_USE_LIBSSH2 OFF CACHE BOOL "Use libSSH2")
-  if(WIN32)
-    set(CMAKE_USE_SCHANNEL ON CACHE BOOL "enable Windows native SSL/TLS")
-  elseif(APPLE)
-    set(CMAKE_USE_SECTRANSP ON CACHE BOOL "enable Apple OS native SSL/TLS")
-  else()
-    # TODO Linux?
-  endif()
+  set(CURL_DISABLE_TESTS ON CACHE BOOL "Disable Curl tests")
 
   add_subdirectory(curl)
 endif()
@@ -90,6 +87,11 @@ if(NOT USE_SHARED_FREETYPE AND NOT LAF_BACKEND STREQUAL "skia")
   if(UNIX)
     target_include_directories(freetype BEFORE PUBLIC
       ${CMAKE_CURRENT_BINARY_DIR}/freetype2/include)
+  endif()
+
+  if(HARFBUZZ_FOUND)
+    target_link_libraries(freetype PRIVATE ${HARFBUZZ_LIBRARIES})
+    target_include_directories(freetype PRIVATE ${HARFBUZZ_INCLUDE_DIRS})
   endif()
 
   if(NOT USE_SHARED_LIBPNG)
@@ -126,6 +128,9 @@ endif()
 add_subdirectory(json11)
 
 # libarchive
+set(HAVE_WCSCPY 1)
+set(HAVE_WCSLEN 1)
+
 set(ENABLE_WERROR OFF CACHE BOOL "Treat warnings as errors - default is ON for Debug, OFF otherwise.")
 set(ENABLE_TEST OFF CACHE BOOL "Enable unit and regression tests")
 set(ENABLE_COVERAGE OFF CACHE BOOL "Enable code coverage (GCC only, automatically sets ENABLE_TEST to ON)")
@@ -141,6 +146,8 @@ set(ENABLE_CAT OFF CACHE BOOL "Enable cat building")
 set(ENABLE_TAR OFF CACHE BOOL "Enable tar building")
 set(ENABLE_CPIO OFF CACHE BOOL "Enable cpio building")
 set(ENABLE_LIBB2 OFF CACHE BOOL "Enable the use of the system LIBB2 library if found")
+set(ENABLE_ICONV OFF CACHE BOOL "Enable iconv support")
+set(WINDOWS_VERSION "WS08" CACHE STRING "Set Windows Vista as the target version for compiling libarchive (Windows only)" FORCE)
 add_subdirectory(libarchive)
 target_include_directories(archive_static INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/libarchive/libarchive>)
@@ -205,17 +212,10 @@ if(ENABLE_SCRIPTING)
     target_compile_definitions(lua PUBLIC LUA_USE_LINUX=1)
   endif()
 
-  # Compile Lua as C++ to control errors with exceptions and have
-  # stack unwinding (i.e. calling destructors correctly).
-  if(MSVC)
-    target_compile_options(lua PRIVATE -TP)
-    target_compile_options(lualib PRIVATE -TP)
-    target_compile_options(lauxlib PRIVATE -TP)
-  else()
-    target_compile_options(lua PRIVATE -xc++)
-    target_compile_options(lualib PRIVATE -xc++)
-    target_compile_options(lauxlib PRIVATE -xc++)
-  endif()
+  # Compile Lua C files as C++ to control errors with exceptions and
+  # have stack unwinding (i.e. calling destructors correctly).
+  file(GLOB all_lua_source_files lua/*.c)
+  set_source_files_properties(${all_lua_source_files} PROPERTIES LANGUAGE CXX)
 
   target_compile_definitions(lua PUBLIC LUA_FLOORN2I=F2Ifloor)
   target_compile_definitions(lualib PRIVATE HAVE_SYSTEM)

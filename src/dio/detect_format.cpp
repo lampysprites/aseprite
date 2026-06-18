@@ -26,40 +26,62 @@
 #define PSD_STAMP        "8BPS"
 #define QOI_STAMP        "qoif"
 
+#include <unordered_map>
+
+static std::unordered_map<std::string, dio::FileFormat> g_customFormats;
+
 namespace dio {
+
+bool register_custom_format_extension(const std::string& ext, const FileFormat format)
+{
+  if (detect_format_by_file_extension("file." + ext) != FileFormat::UNKNOWN)
+    return false;
+
+  g_customFormats.try_emplace(ext, format);
+  return true;
+}
+
+void unregister_custom_format_extension(const std::string& ext, const FileFormat format)
+{
+  if (g_customFormats[ext] == format)
+    g_customFormats.erase(ext);
+}
 
 FileFormat detect_format(const std::string& filename)
 {
-  FileFormat ff = detect_format_by_file_content(filename);
-  if (ff == FileFormat::UNKNOWN)
-    ff = detect_format_by_file_extension(filename);
+  FileFormat ff = detect_format_by_file_extension(filename);
+
+  if (ff < FileFormat::FIRST_CUSTOM) {
+    // For non-custom formats, we use content detection and override the detection if we find
+    // something valid, to account for incorrect extensions.
+    const FileFormat contentFormat = detect_format_by_file_content(filename);
+    if (contentFormat > FileFormat::UNKNOWN)
+      ff = contentFormat;
+  }
+
   return ff;
 }
 
-FileFormat detect_format_by_file_content_bytes(const uint8_t* buf,
-                                               const int n)
+FileFormat detect_format_by_file_content_bytes(const uint8_t* buf, const int n)
 {
-#define IS_MAGIC_WORD(offset, word)             \
-  ((buf[offset+0] == (word & 0xff)) &&          \
-   (buf[offset+1] == ((word & 0xff00) >> 8)))
+#define IS_MAGIC_WORD(offset, word)                                                                \
+  ((buf[offset + 0] == (word & 0xff)) && (buf[offset + 1] == ((word & 0xff00) >> 8)))
 
-#define IS_MAGIC_DWORD(offset, dword)                     \
-  ((buf[offset+0] == (dword & 0xff)) &&                   \
-   (buf[offset+1] == ((dword & 0xff00) >> 8)) &&          \
-   (buf[offset+2] == ((dword & 0xff0000) >> 16)) &&       \
-   (buf[offset+3] == ((dword & 0xff000000) >> 24)))
+#define IS_MAGIC_DWORD(offset, dword)                                                              \
+  ((buf[offset + 0] == (dword & 0xff)) && (buf[offset + 1] == ((dword & 0xff00) >> 8)) &&          \
+   (buf[offset + 2] == ((dword & 0xff0000) >> 16)) &&                                              \
+   (buf[offset + 3] == ((dword & 0xff000000) >> 24)))
 
   if (n >= 2) {
     if (n >= 6) {
       if (n >= 8) {
         if (n >= 12) {
           if (std::strncmp((const char*)buf, WEBP_STAMP_1, 4) == 0 ||
-              std::strncmp((const char*)buf+8, WEBP_STAMP_2, 4) == 0)
+              std::strncmp((const char*)buf + 8, WEBP_STAMP_2, 4) == 0)
             return FileFormat::WEBP_ANIMATION;
         }
 
-        if (IS_MAGIC_DWORD(0, PNG_MAGIC_DWORD1) &&
-            IS_MAGIC_DWORD(4, PNG_MAGIC_DWORD2))
+        if (IS_MAGIC_DWORD(0, PNG_MAGIC_DWORD1) && IS_MAGIC_DWORD(4, PNG_MAGIC_DWORD2))
           return FileFormat::PNG_IMAGE;
       }
 
@@ -76,8 +98,7 @@ FileFormat detect_format_by_file_content_bytes(const uint8_t* buf,
       if (IS_MAGIC_WORD(4, ASE_MAGIC_NUMBER))
         return FileFormat::ASE_ANIMATION;
 
-      if (IS_MAGIC_WORD(4, FLI_MAGIC_NUMBER) ||
-          IS_MAGIC_WORD(4, FLC_MAGIC_NUMBER))
+      if (IS_MAGIC_WORD(4, FLI_MAGIC_NUMBER) || IS_MAGIC_WORD(4, FLC_MAGIC_NUMBER))
         return FileFormat::FLIC_ANIMATION;
     }
 
@@ -109,8 +130,7 @@ FileFormat detect_format_by_file_extension(const std::string& filename)
   // By extension
   const std::string ext = base::string_to_lower(base::get_file_extension(filename));
 
-  if (ext == "ase" ||
-      ext == "aseprite")
+  if (ext == "ase" || ext == "aseprite")
     return FileFormat::ASE_ANIMATION;
 
   if (ext == "act")
@@ -122,8 +142,7 @@ FileFormat detect_format_by_file_extension(const std::string& filename)
   if (ext == "col")
     return FileFormat::COL_PALETTE;
 
-  if (ext == "flc" ||
-      ext == "fli")
+  if (ext == "flc" || ext == "fli")
     return FileFormat::FLIC_ANIMATION;
 
   if (ext == "gif")
@@ -138,15 +157,13 @@ FileFormat detect_format_by_file_extension(const std::string& filename)
   if (ext == "ico")
     return FileFormat::ICO_IMAGES;
 
-  if (ext == "jpg" ||
-      ext == "jpeg")
+  if (ext == "jpg" || ext == "jpeg")
     return FileFormat::JPEG_IMAGE;
 
   if (ext == "pal")
     return FileFormat::PAL_PALETTE;
 
-  if (ext == "pcx" ||
-      ext == "pcc")
+  if (ext == "pcx" || ext == "pcc")
     return FileFormat::PCX_IMAGE;
 
   if (ext == "png")
@@ -164,12 +181,15 @@ FileFormat detect_format_by_file_extension(const std::string& filename)
   if (ext == "webp")
     return FileFormat::WEBP_ANIMATION;
 
-  if (ext == "psd" ||
-      ext == "psb")
+  if (ext == "psd" || ext == "psb")
     return FileFormat::PSD_IMAGE;
 
   if (ext == "qoi")
     return FileFormat::QOI_IMAGE;
+
+  const auto it = g_customFormats.find(ext);
+  if (it != g_customFormats.end())
+    return it->second;
 
   return FileFormat::UNKNOWN;
 }

@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019-2022  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -15,7 +15,6 @@
 #include "app/commands/filters/convolution_matrix_stock.h"
 #include "app/commands/filters/filter_manager_impl.h"
 #include "app/commands/filters/filter_window.h"
-#include "app/commands/filters/filter_worker.h"
 #include "app/commands/new_params.h"
 #include "app/context.h"
 #include "app/doc.h"
@@ -45,13 +44,11 @@ using namespace filters;
 using namespace ui;
 
 struct ConvolutionMatrixParams : public NewParams {
-  Param<bool> ui { this, true, "ui" };
-  Param<filters::Target> channels { this, 0, "channels" };
-  Param<filters::TiledMode> tiledMode { this, filters::TiledMode::NONE, "tiledMode" };
-  Param<std::string> fromResource { this, std::string(), "fromResource" };
+  Param<bool> ui{ this, true, "ui" };
+  Param<filters::Target> channels{ this, 0, "channels" };
+  Param<filters::TiledMode> tiledMode{ this, filters::TiledMode::NONE, "tiledMode" };
+  Param<std::string> fromResource{ this, std::string(), "fromResource" };
 };
-
-#ifdef ENABLE_UI
 
 static const char* ConfigSection = "ConvolutionMatrix";
 
@@ -60,7 +57,9 @@ public:
   ConvolutionMatrixWindow(ConvolutionMatrixFilter& filter,
                           FilterManagerImpl& filterMgr,
                           ConvolutionMatrixStock& stock)
-    : FilterWindow("Convolution Matrix", ConfigSection, &filterMgr,
+    : FilterWindow("Convolution Matrix",
+                   ConfigSection,
+                   &filterMgr,
                    WithChannelsSelector,
                    WithTiledCheckBox,
                    filter.getTiledMode())
@@ -73,24 +72,24 @@ public:
   {
     getContainer()->addChild(m_controlsWidget.get());
 
-    m_reloadButton->Click.connect([this]{ onReloadStock(); });
-    m_stockListBox->Change.connect([this]{ onMatrixChange(); });
+    m_reloadButton->Click.connect([this] { onReloadStock(); });
+    m_stockListBox->Change.connect([this] { onMatrixChange(); });
 
     fillStockListBox();
   }
 
 private:
-  void onReloadStock() {
+  void onReloadStock()
+  {
     m_stock.reloadStock();
     fillStockListBox();
   }
 
-  void setupTiledMode(TiledMode tiledMode) override {
-    m_filter.setTiledMode(tiledMode);
-  }
+  void setupTiledMode(TiledMode tiledMode) override { m_filter.setTiledMode(tiledMode); }
 
-  void fillStockListBox() {
-    const char* oldSelected = (m_filter.getMatrix() ? m_filter.getMatrix()->getName(): NULL);
+  void fillStockListBox()
+  {
+    const char* oldSelected = (m_filter.getMatrix() ? m_filter.getMatrix()->getName() : NULL);
 
     // Clean the list
     while (!m_stockListBox->children().empty()) {
@@ -99,8 +98,8 @@ private:
       delete listitem;
     }
 
-    for (ConvolutionMatrixStock::iterator it = m_stock.begin(), end = m_stock.end();
-         it != end; ++it) {
+    for (ConvolutionMatrixStock::iterator it = m_stock.begin(), end = m_stock.end(); it != end;
+         ++it) {
       std::shared_ptr<ConvolutionMatrix> matrix = *it;
       ListItem* listitem = new ListItem(matrix->getName());
       m_stockListBox->addChild(listitem);
@@ -153,8 +152,6 @@ private:
   Button* m_reloadButton;
 };
 
-#endif  // ENABLE_UI
-
 class ConvolutionMatrixCommand : public CommandWithNewParams<ConvolutionMatrixParams> {
 public:
   ConvolutionMatrixCommand();
@@ -165,7 +162,7 @@ protected:
 };
 
 ConvolutionMatrixCommand::ConvolutionMatrixCommand()
-  : CommandWithNewParams<ConvolutionMatrixParams>(CommandId::ConvolutionMatrix(), CmdRecordableFlag)
+  : CommandWithNewParams<ConvolutionMatrixParams>(CommandId::ConvolutionMatrix())
 {
 }
 
@@ -177,32 +174,29 @@ bool ConvolutionMatrixCommand::onEnabled(Context* context)
 
 void ConvolutionMatrixCommand::onExecute(Context* context)
 {
-#ifdef ENABLE_UI
   const bool ui = (params().ui() && context->isUIAvailable());
-#endif
 
   static ConvolutionMatrixStock stock; // Load stock
-  ConvolutionMatrixFilter filter; // Create the filter and setup initial settings
+  ConvolutionMatrixFilter filter;      // Create the filter and setup initial settings
 
   std::shared_ptr<ConvolutionMatrix> matrix;
-#ifdef ENABLE_UI
   if (ui) {
     // Get last used (selected) matrix
     matrix = stock.getByName(get_config_string(ConfigSection, "Selected", ""));
 
-    DocumentPreferences& docPref = Preferences::instance()
-      .document(context->activeDocument());
+    DocumentPreferences& docPref = Preferences::instance().document(context->activeDocument());
     filter.setTiledMode(docPref.tiled.mode());
   }
-#endif // ENABLE_UI
 
-  if (params().tiledMode.isSet()) filter.setTiledMode(params().tiledMode());
-  if (params().fromResource.isSet()) matrix = stock.getByName(params().fromResource().c_str());
-  if (matrix) filter.setMatrix(matrix);
+  if (params().tiledMode.isSet())
+    filter.setTiledMode(params().tiledMode());
+  if (params().fromResource.isSet())
+    matrix = stock.getByName(params().fromResource().c_str());
+  if (matrix)
+    filter.setMatrix(matrix);
 
   FilterManagerImpl filterMgr(context, &filter);
 
-#ifdef ENABLE_UI
   if (ui) {
     ConvolutionMatrixWindow window(filter, filterMgr, stock);
     if (window.doModal()) {
@@ -210,10 +204,8 @@ void ConvolutionMatrixCommand::onExecute(Context* context)
         set_config_string(ConfigSection, "Selected", filter.getMatrix()->getName());
     }
   }
-  else
-#endif // ENABLE_UI
-  {
-    start_filter_worker(&filterMgr);
+  else {
+    filterMgr.startWorker(false);
   }
 }
 

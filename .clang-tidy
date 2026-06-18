@@ -5,6 +5,9 @@
 # with (int, int) or (string, string) so it does't make sense to enable
 # this option.
 #
+# clang-analyzer-optin.core.EnumCastOutOfRange: We disable this check
+# as we use some enums as flags.
+#
 # readability-braces-around-statements: We use a lot of:
 #   if (cond)
 #     stmt;
@@ -31,6 +34,9 @@
 # readability-named-parameter: We prefer misc-unused-parameters to
 # remove a parameter name that is not used.
 #
+# readability-simplify-boolean-expr: Avoid showing comments about
+# boolean expressions inside ASSERTs().
+#
 # misc-use-anonymous-namespace: We use anonymous namespaces or static
 # functions indifferently.
 #
@@ -48,6 +54,9 @@ Checks: >
   portability-*,
   readability-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  -misc-include-cleaner,
   -misc-use-anonymous-namespace,
   -readability-braces-around-statements,
   -readability-function-cognitive-complexity,
@@ -58,7 +67,11 @@ Checks: >
   -readability-uppercase-literal-suffix
 WarningsAsErrors: ''
 CheckOptions:
+  - key: readability-implicit-bool-conversion.AllowIntegerConditions
+    value: true
   - key: readability-implicit-bool-conversion.AllowPointerConditions
+    value: true
+  - key: readability-simplify-boolean-expr.IgnoreMacros
     value: true
   - key: misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic
     value: true

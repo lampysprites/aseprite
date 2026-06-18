@@ -1,8 +1,8 @@
 <!-- Aseprite -->
-<!-- Copyright (C) 2019-2022  Igara Studio S.A. -->
+<!-- Copyright (C) 2019-present  Igara Studio S.A. -->
 <!-- Copyright (C) 2001-2018  David Capello -->
 <gui>
-  <window id="export_sprite_sheet" text="@.title">
+  <window id="export_sprite_sheet" text="@.title" help="sprite-sheet#export">
   <vbox expansive="true">
 
     <!-- Tabs -->
@@ -25,11 +25,11 @@
     <!-- Layout -->
 
     <grid id="section_layout" columns="4" expansive="true">
-      <label text="@.sheet_type" />
+      <label text="@.sheet_type" for="sheet_type" />
       <combobox id="sheet_type" expansive="true" cell_hspan="3" cell_align="horizontal"
                 tooltip="@.sheet_type_tooltip" tooltip_dir="bottom" />
 
-      <label text="@.constraints" />
+      <label text="@.constraints" for="constraint_type" />
       <hbox cell_hspan="3">
         <combobox id="constraint_type" tooltip="@.constraints_tooltip" />
         <expr id="width_constraint" />
@@ -40,6 +40,7 @@
       <hbox cell_hspan="3">
         <check id="merge_dups" text="@.merge_dups" tooltip="@.merge_dups_tooltip" />
         <check id="ignore_empty" text="@.ignore_empty" tooltip="@.ignore_empty_tooltip" />
+        <check id="power_of_two_size" text="@.power_of_two_size" tooltip="@.power_of_two_size_tooltip" />
       </hbox>
     </grid>
 
@@ -50,15 +51,15 @@
       <button id="close_sprite_section" icon="window_close_icon" />
     </hbox>
     <grid id="section_sprite" columns="4" expansive="true">
-      <label text="@.source" />
+      <label text="@.source" for="source" />
       <combobox id="source" text="" cell_hspan="2" cell_align="horizontal" />
       <boxfiller />
 
-      <label text="@.layers" />
+      <label text="@.layers" for="layers" />
       <combobox id="layers" text="" cell_hspan="2" cell_align="horizontal" />
       <check id="split_layers" text="@.split_layers" tooltip="@.split_layers_tooltip" tooltip_dir="bottom" />
 
-      <label text="@.frames" />
+      <label text="@.frames" for="frames" />
       <combobox id="frames" text="" cell_hspan="2" cell_align="horizontal" />
       <check id="split_tags" text="@.split_tags" tooltip="@.split_tags_tooltip" tooltip_dir="top" />
     </grid>
@@ -75,11 +76,11 @@
       <hbox cell_hspan="3">
         <vbox>
           <grid columns="2">
-            <label text="@.border" />
+            <label text="@.border" for="border_padding" />
             <expr id="border_padding" text="0" tooltip="@.border_tooltip" />
-            <label text="@.shape" />
+            <label text="@.shape" for="shape_padding" />
             <expr id="shape_padding" text="0" tooltip="@.shape_tooltip" />
-            <label text="@.inner" />
+            <label text="@.inner" for="inner_padding" />
             <expr id="inner_padding" text="0" tooltip="@.inner_tooltip" />
           </grid>
         </vbox>
@@ -111,10 +112,10 @@
     </hbox>
     <grid id="section_output" columns="4" expansive="true">
       <check id="image_enabled" text="@.output_file" />
-      <button id="image_filename" cell_hspan="3" cell_align="horizontal" />
+      <filename id="image_filename" cell_hspan="3" cell_align="horizontal" />
 
       <check id="data_enabled" text="@.json_data" />
-      <button id="data_filename" cell_hspan="3" cell_align="horizontal" />
+      <filename id="data_filename" cell_hspan="3" cell_align="horizontal" />
 
       <hbox />
       <hbox id="data_meta" cell_hspan="3" cell_align="horizontal">
@@ -130,12 +131,12 @@
 
       <hbox />
       <grid id="data_formats_placeholder" columns="3" cell_hspan="3" cell_align="horizontal">
-        <label text="@.data_filename_format" />
+        <label text="@.data_filename_format" for="data_filename_format" />
         <entry id="data_filename_format" maxsize="1024" maxwidth="256" cell_align="horizontal"
                tooltip="@.data_filename_format_tooltip" />
         <link text="(?)" url="https://www.aseprite.org/docs/cli/#filename-format" />
 
-        <label text="@.data_tagname_format" />
+        <label text="@.data_tagname_format" for="data_tagname_format" />
         <entry id="data_tagname_format" maxsize="1024" maxwidth="256" cell_align="horizontal"
                tooltip="@.data_tagname_format_tooltip" />
         <link text="(?)" url="https://www.aseprite.org/docs/cli/#tagname-format" />

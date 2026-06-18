@@ -1,5 +1,5 @@
 // Aseprite
-// Copyright (C) 2023  Igara Studio S.A.
+// Copyright (C) 2023-2025  Igara Studio S.A.
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
@@ -13,33 +13,30 @@
 #include "doc/tile.h"
 #include "doc/user_data.h"
 
-namespace app {
-namespace cmd {
+namespace app { namespace cmd {
 
-  class SetTileDataProperties : public Cmd,
-                                public WithTileset {
-  public:
-    SetTileDataProperties(
-      doc::Tileset* ts,
-      doc::tile_index ti,
-      const std::string& group,
-      doc::UserData::Properties&& newProperties);
+class SetTileDataProperties : public Cmd,
+                              public WithTileset {
+public:
+  SetTileDataProperties(doc::Tileset* ts,
+                        doc::tile_index ti,
+                        const std::string& group,
+                        doc::UserData::Properties&& newProperties);
 
-  protected:
-    void onExecute() override;
-    void onUndo() override;
-    size_t onMemSize() const override {
-      return sizeof(*this);     // TODO + properties size
-    }
+protected:
+  void onExecute() override;
+  void onUndo() override;
+  size_t onMemSize() const override
+  {
+    return sizeof(*this); // TODO + properties size
+  }
 
-  private:
-    doc::tile_index m_ti;
-    std::string m_group;
-    doc::UserData::Properties m_oldProperties;
-    doc::UserData::Properties m_newProperties;
-  };
+private:
+  doc::tile_index m_ti;
+  std::string m_group;
+  doc::UserData::Properties m_properties;
+};
 
-} // namespace cmd
-} // namespace app
+}} // namespace app::cmd
 
 #endif

@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2018-2024  Igara Studio S.A.
+// Copyright (C) 2018-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/ui/editor/drawing_state.h"
@@ -59,22 +59,18 @@ static int get_delay_interval_for_tool_loop(tools::ToolLoop* toolLoop)
   }
 }
 
-DrawingState::DrawingState(Editor* editor,
-                           tools::ToolLoop* toolLoop,
-                           const DrawingType type)
+DrawingState::DrawingState(Editor* editor, tools::ToolLoop* toolLoop, const DrawingType type)
   : m_editor(editor)
   , m_type(type)
-  , m_delayedMouseMove(this, editor,
-                       get_delay_interval_for_tool_loop(toolLoop))
+  , m_delayedMouseMove(this, editor, get_delay_interval_for_tool_loop(toolLoop))
   , m_toolLoop(toolLoop)
   , m_toolLoopManager(new tools::ToolLoopManager(toolLoop))
-  , m_mouseMoveReceived(false)
   , m_mousePressedReceived(false)
   , m_processScrollChange(true)
 {
-  m_beforeCmdConn =
-    UIContext::instance()->BeforeCommandExecution.connect(
-      &DrawingState::onBeforeCommandExecution, this);
+  m_beforeCmdConn = UIContext::instance()->BeforeCommandExecution.connect(
+    &DrawingState::onBeforeCommandExecution,
+    this);
 }
 
 DrawingState::~DrawingState()
@@ -96,30 +92,27 @@ void DrawingState::initToolLoop(Editor* editor,
   // For selection inks we don't use a "the selected layer" for
   // preview purposes, because we want the selection feedback to be at
   // the top of all layers.
-  Layer* previewLayer = (m_toolLoop->getInk()->isSelection() ||
-                         m_toolLoop->getInk()->isSlice() ?
-                           nullptr : m_toolLoop->getLayer());
+  Layer* previewLayer = (m_toolLoop->getInk()->isSelection() || m_toolLoop->getInk()->isSlice() ?
+                           nullptr :
+                           m_toolLoop->getLayer());
 
   // Prepare preview image (the destination image will be our preview
   // in the tool-loop time, so we can see what we are drawing)
   editor->renderEngine().setPreviewImage(
     previewLayer,
     m_toolLoop->getFrame(),
-    tileset ? nullptr: m_toolLoop->getDstImage(),
+    tileset ? nullptr : m_toolLoop->getDstImage(),
     tileset,
     m_toolLoop->getCelOrigin(),
-    (previewLayer &&
-     previewLayer->isImage() ?
-     static_cast<LayerImage*>(m_toolLoop->getLayer())->blendMode():
-     doc::BlendMode::NEG_BW)); // To preview the selection ink we use the negative black & white blender
+    (previewLayer && previewLayer->isImage() ?
+       static_cast<LayerImage*>(m_toolLoop->getLayer())->blendMode() :
+       doc::BlendMode::NEG_BW)); // To preview the selection ink we use the negative black & white
+                                 // blender
 
   ASSERT(!m_toolLoopManager->isCanceled());
 
   m_velocity.reset();
   m_lastPointer = pointer;
-  m_mouseDownPos = (msg ? msg->position():
-                          editor->editorToScreen(pointer.point()));
-  m_mouseDownTime = base::current_tick();
 
   m_toolLoopManager->prepareLoop(pointer);
   m_toolLoopManager->pressButton(pointer);
@@ -127,6 +120,12 @@ void DrawingState::initToolLoop(Editor* editor,
   ASSERT(!m_toolLoopManager->isCanceled());
 
   editor->captureMouse();
+}
+
+void DrawingState::disableMouseStabilizer()
+{
+  ASSERT(m_toolLoopManager);
+  m_toolLoopManager->disableMouseStabilizer();
 }
 
 void DrawingState::sendMovementToToolLoop(const tools::Pointer& pointer)
@@ -156,8 +155,7 @@ bool DrawingState::onMouseDown(Editor* editor, MouseMessage* msg)
   if (!editor->hasCapture())
     editor->captureMouse();
 
-  tools::Pointer pointer = pointer_from_msg(editor, msg,
-                                            m_velocity.velocity());
+  tools::Pointer pointer = pointer_from_msg(editor, msg, m_velocity.velocity());
   m_lastPointer = pointer;
 
   m_delayedMouseMove.onMouseDown(msg);
@@ -166,8 +164,17 @@ bool DrawingState::onMouseDown(Editor* editor, MouseMessage* msg)
   // and now the user pressed the right button to draw the straight
   // line with the background color.
   bool recreateLoop = false;
-  if (m_type == DrawingType::LineFreehand &&
-      !m_mousePressedReceived) {
+  if (m_type == DrawingType::LineFreehand && !m_mousePressedReceived) {
+    // The Shift+a custom mouse button could start a drag action
+    // (e.g. Shift+X1 button), here we check if this is the case.
+    if (auto dragState = handleDragActionsFromMessage(editor, msg)) {
+      // Cancel the whole tool loop for the drag action.
+      m_toolLoopManager->cancel();
+      destroyLoopIfCanceled(editor);
+      editor->setState(dragState);
+      return true;
+    }
+
     recreateLoop = true;
   }
 
@@ -208,9 +215,8 @@ bool DrawingState::onMouseUp(Editor* editor, MouseMessage* msg)
   // ("one point" controller selection tool i.e. the magic wand, and
   // selection tools with Add or Subtract mode aren't cancelled with
   // one click).
-  if (!m_toolLoop->getInk()->isSelection() ||
-      m_toolLoop->getController()->isOnePoint() ||
-      !canInterpretMouseMovementAsJustOneClick() ||
+  if (!m_toolLoop->getInk()->isSelection() || m_toolLoop->getController()->isOnePoint() ||
+      !m_delayedMouseMove.canInterpretMouseMovementAsJustOneClick() ||
       // In case of double-click (to select tiles) we don't want to
       // deselect if the mouse is not moved. In this case the tile
       // will be selected anyway even if the mouse is not moved.
@@ -223,6 +229,8 @@ bool DrawingState::onMouseUp(Editor* editor, MouseMessage* msg)
     if (m_toolLoopManager->releaseButton(m_lastPointer))
       return true;
   }
+  if (m_toolLoop->isSelectionToolLoop())
+    m_toolLoop->clearSelectionToolMask(true);
 
   destroyLoop(editor);
 
@@ -265,14 +273,6 @@ bool DrawingState::onMouseMove(Editor* editor, MouseMessage* msg)
                                  msg->pointerType(),
                                  msg->pressure());
 
-  // Indicate that we've received a real mouse movement event here
-  // (used in the Rectangular Marquee to deselect when we just do a
-  // simple click without moving the mouse).
-  m_mouseMoveReceived = true;
-  gfx::Point delta = (msg->position() - m_mouseDownPos);
-  m_mouseMaxDelta.x = std::max(m_mouseMaxDelta.x, std::abs(delta.x));
-  m_mouseMaxDelta.y = std::max(m_mouseMaxDelta.y, std::abs(delta.y));
-
   // Use DelayedMouseMove for tools like line, rectangle, etc. (that
   // use the only the last mouse position) to filter out rapid mouse
   // movement.
@@ -280,12 +280,9 @@ bool DrawingState::onMouseMove(Editor* editor, MouseMessage* msg)
   return true;
 }
 
-void DrawingState::onCommitMouseMove(Editor* editor,
-                                     const gfx::PointF& spritePos)
+void DrawingState::onCommitMouseMove(Editor* editor, const gfx::PointF& spritePos)
 {
-  if (m_toolLoop &&
-      m_toolLoopManager &&
-      !m_toolLoopManager->isCanceled()) {
+  if (m_toolLoop && m_toolLoopManager && !m_toolLoopManager->isCanceled()) {
     handleMouseMovement();
   }
 }
@@ -294,8 +291,7 @@ bool DrawingState::onSetCursor(Editor* editor, const gfx::Point& mouseScreenPos)
 {
   if (m_toolLoop->getInk()->isEyedropper()) {
     auto theme = skin::SkinTheme::get(editor);
-    editor->showMouseCursor(
-      kCustomCursor, theme->cursors.eyedropper());
+    editor->showMouseCursor(kCustomCursor, theme->cursors.eyedropper());
   }
   else {
     editor->showBrushPreview(mouseScreenPos);
@@ -307,13 +303,10 @@ bool DrawingState::onKeyDown(Editor* editor, KeyMessage* msg)
 {
   Command* command = NULL;
   Params params;
-  if (KeyboardShortcuts::instance()
-        ->getCommandFromKeyMessage(msg, &command, &params)) {
+  if (KeyboardShortcuts::instance()->getCommandFromKeyMessage(msg, &command, &params)) {
     // We accept some commands...
-    if (command->id() == CommandId::Zoom() ||
-        command->id() == CommandId::Undo() ||
-        command->id() == CommandId::Redo() ||
-        command->id() == CommandId::Cancel()) {
+    if (command->id() == CommandId::Zoom() || command->id() == CommandId::Undo() ||
+        command->id() == CommandId::Redo() || command->id() == CommandId::Cancel()) {
       UIContext::instance()->executeCommandFromMenuOrShortcut(command, params);
       return true;
     }
@@ -330,8 +323,7 @@ bool DrawingState::onKeyUp(Editor* editor, KeyMessage* msg)
   if (msg->scancode() == ui::kKeyEsc ||
       // Cancel "Shift on freehand" line preview when the Shift key is
       // released and the user didn't press the mouse button.
-      (m_type == DrawingType::LineFreehand &&
-       !m_mousePressedReceived &&
+      (m_type == DrawingType::LineFreehand && !m_mousePressedReceived &&
        !editor->startStraightLineWithFreehandTool(nullptr))) {
     m_toolLoopManager->cancel();
   }
@@ -389,18 +381,6 @@ void DrawingState::handleMouseMovement()
   m_toolLoopManager->movement(m_lastPointer);
 }
 
-bool DrawingState::canInterpretMouseMovementAsJustOneClick()
-{
-  // If the user clicked (pressed and released the mouse button) in
-  // less than 250 milliseconds in "the same place" (inside a 7 pixels
-  // rectangle actually, to detect stylus shake).
-  return
-    !m_mouseMoveReceived ||
-    (m_mouseMaxDelta.x < 4 &&
-     m_mouseMaxDelta.y < 4 &&
-     (base::current_tick() - m_mouseDownTime < 250));
-}
-
 bool DrawingState::canExecuteCommands()
 {
   // Returning true here means that the user can trigger commands with
@@ -408,8 +388,7 @@ bool DrawingState::canExecuteCommands()
   // keyboard shortcuts only when the Shift key was pressed to run a
   // command (e.g. Shift+N), not to draw a straight line from the
   // pencil (freehand) tool.
-  return (m_type == DrawingType::LineFreehand &&
-          !m_mousePressedReceived);
+  return (m_type == DrawingType::LineFreehand && !m_mousePressedReceived);
 }
 
 void DrawingState::onBeforeCommandExecution(CommandExecutionEvent& ev)
@@ -419,8 +398,7 @@ void DrawingState::onBeforeCommandExecution(CommandExecutionEvent& ev)
 
   if (canExecuteCommands() ||
       // Undo/Redo/Cancel will cancel the ToolLoop
-      ev.command()->id() == CommandId::Undo() ||
-      ev.command()->id() == CommandId::Redo() ||
+      ev.command()->id() == CommandId::Undo() || ev.command()->id() == CommandId::Redo() ||
       ev.command()->id() == CommandId::Cancel()) {
     if (!canExecuteCommands()) {
       // Cancel the execution of Undo/Redo/Cancel because we've
@@ -437,6 +415,9 @@ void DrawingState::destroyLoopIfCanceled(Editor* editor)
 {
   // Cancel drawing loop
   if (m_toolLoopManager->isCanceled()) {
+    if (m_toolLoop->isSelectionToolLoop())
+      m_toolLoop->clearSelectionToolMask(true);
+
     destroyLoop(editor);
 
     // Change to standby state
@@ -457,6 +438,11 @@ void DrawingState::destroyLoop(Editor* editor)
   m_toolLoop.reset(nullptr);
 
   app_rebuild_documents_tabs();
+}
+
+ExpandCelCanvas* DrawingState::expandCelCanvas() const
+{
+  return m_toolLoop->expandCelCanvas();
 }
 
 } // namespace app

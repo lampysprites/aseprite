@@ -1,5 +1,5 @@
 # Aseprite
-# Copyright (C) 2018-2024  Igara Studio S.A.
+# Copyright (C) 2018-2025  Igara Studio S.A.
 # Copyright (C) 2001-2018  David Capello
 
 # Generate a ui::Widget for each widget in a XML file
@@ -74,7 +74,7 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${output_fn}.tmp ${output_fn}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   MAIN_DEPENDENCY ${strings_en_ini}
-  DEPENDS ${GEN_DEP})
+  DEPENDS ${GEN_DEP} commands/commands_list.h)
 list(APPEND generated_files ${output_fn})
 
 # Check translations
@@ -87,14 +87,6 @@ add_custom_command(
   DEPENDS ${GEN_DEP} ${widget_files} ${string_files} "${SOURCE_DATA_DIR}/gui.xml")
 list(APPEND generated_files ${output_fn})
 
-if(ENABLE_WEBP)
-  add_definitions(-DENABLE_WEBP)
-endif()
-
-if(ENABLE_PSD)
-  add_definitions(-DENABLE_PSD)
-endif()
-
 # libarchive definitions
 add_definitions(-DLIBARCHIVE_STATIC)
 
@@ -106,14 +98,35 @@ add_library(app-lib ${generated_files})
 # These specific-platform files should be in an external library
 # (e.g. "base" or "os").
 if(WIN32)
-  target_sources(app-lib PRIVATE font_path_win.cpp)
+  target_sources(app-lib PRIVATE fonts/font_path_win.cpp)
 elseif(APPLE)
-  target_sources(app-lib PRIVATE font_path_osx.mm)
+  target_sources(app-lib PRIVATE fonts/font_path_osx.mm)
 else()
-  target_sources(app-lib PRIVATE font_path_unix.cpp)
+  target_sources(app-lib PRIVATE fonts/font_path_unix.cpp)
 endif()
 
+# This defines a specific webp decoding utility function for using
+# in Windows when dragging and dropping images that are stored as
+# webp files (like Chrome does).
+if(WIN32 AND ENABLE_WEBP AND LAF_BACKEND STREQUAL "skia")
+  target_sources(app-lib PRIVATE util/decode_webp.cpp)
+endif()
+
+# Trial-version vs Full version (enable save command)
+if(ENABLE_TRIAL_MODE)
+  target_compile_definitions(app-lib PUBLIC -DENABLE_TRIAL_MODE)
+else()
+  target_compile_definitions(app-lib PUBLIC -DENABLE_SAVE)
+endif()
+
+# Data recovery
+if(NOT ENABLE_TRIAL_MODE OR ENABLE_DRM)
+  set(ENABLE_DATA_RECOVERY on)
+else()
+  set(ENABLE_DATA_RECOVERY off)
+endif()
 if(ENABLE_DATA_RECOVERY)
+  target_compile_definitions(app-lib PUBLIC -DENABLE_DATA_RECOVERY)
   target_sources(app-lib PRIVATE
     crash/backup_observer.cpp
     crash/data_recovery.cpp
@@ -123,6 +136,7 @@ if(ENABLE_DATA_RECOVERY)
     ui/data_recovery_view.cpp)
 endif()
 
+# File formats
 target_sources(app-lib PRIVATE
   file/ase_format.cpp
   file/bmp_format.cpp
@@ -136,32 +150,55 @@ target_sources(app-lib PRIVATE
   file/qoi_format.cpp
   file/svg_format.cpp
   file/tga_format.cpp)
-if(ENABLE_WEBP)
+if(ENABLE_WEBP AND WEBP_FOUND)
+  target_compile_definitions(app-lib PUBLIC -DENABLE_WEBP)
   target_sources(app-lib PRIVATE
     file/webp_format.cpp)
 endif()
 if(ENABLE_PSD)
+  target_link_libraries(app-lib psd)
+  target_compile_definitions(app-lib PUBLIC -DENABLE_PSD)
   target_sources(app-lib PRIVATE
     file/psd_format.cpp)
 endif()
 
+# Extras
+if(ENABLE_DEVMODE)
+  target_compile_definitions(app-lib PUBLIC -DENABLE_DEVMODE)
+endif()
+
+# Enable "Check for updates" info
+if(ENABLE_UPDATER)
+  target_compile_definitions(app-lib PUBLIC -DENABLE_UPDATER)
+endif()
+
+# Scripting
 if(ENABLE_SCRIPTING)
-  if(ENABLE_UI)
-    target_sources(app-lib PRIVATE
-      commands/cmd_developer_console.cpp
-      commands/cmd_open_script_folder.cpp
-      commands/debugger.cpp
-      ui/devconsole_view.cpp)
-  endif()
+  target_link_libraries(app-lib lua lauxlib lualib)
+  target_compile_definitions(app-lib PUBLIC -DENABLE_SCRIPTING)
+
   if(ENABLE_WEBSOCKET)
+    target_link_libraries(app-lib ixwebsocket)
+    target_compile_definitions(app-lib PUBLIC -DENABLE_WEBSOCKET)
     target_sources(app-lib PRIVATE
       script/websocket_class.cpp)
+  endif()  
+  
+  if(ENABLE_FFI)
+    target_link_libraries(app-lib cffi-lua)
+    target_compile_definitions(app-lib PUBLIC -DENABLE_FFI)
   endif()
+
   target_sources(app-lib PRIVATE
+    commands/cmd_developer_console.cpp
+    commands/cmd_open_script_folder.cpp
     commands/cmd_run_script.cpp
+    commands/debugger.cpp
     script/app_command_object.cpp
+    script/app_clipboard_object.cpp
     script/app_fs_object.cpp
     script/app_object.cpp
+    script/app_os_object.cpp
     script/app_theme_object.cpp
     script/brush_class.cpp
     script/canvas_widget.cpp
@@ -196,6 +233,7 @@ if(ENABLE_SCRIPTING)
     script/range_class.cpp
     script/rectangle_class.cpp
     script/require.cpp
+    script/script_input_chain.cpp
     script/security.cpp
     script/selection_class.cpp
     script/site_class.cpp
@@ -216,246 +254,23 @@ if(ENABLE_SCRIPTING)
     script/values.cpp
     script/version_class.cpp
     script/window_class.cpp
-    shell.cpp)
+    shell.cpp
+    ui/devconsole_view.cpp)
 endif()
 
-if(ENABLE_UI)
-  target_sources(app-lib PRIVATE
-    app_brushes.cpp
-    app_menus.cpp
-    closed_docs.cpp
-    commands/cmd_about.cpp
-    commands/cmd_advanced_mode.cpp
-    commands/cmd_cancel.cpp
-    commands/cmd_cel_properties.cpp
-    commands/cmd_change_brush.cpp
-    commands/cmd_change_color.cpp
-    commands/cmd_clear.cpp
-    commands/cmd_clear_cel.cpp
-    commands/cmd_clear_recent_files.cpp
-    commands/cmd_close_file.cpp
-    commands/cmd_contiguous_fill.cpp
-    commands/cmd_copy.cpp
-    commands/cmd_copy_cel.cpp
-    commands/cmd_copy_merged.cpp
-    commands/cmd_cut.cpp
-    commands/cmd_discard_brush.cpp
-    commands/cmd_duplicate_layer.cpp
-    commands/cmd_duplicate_sprite.cpp
-    commands/cmd_duplicate_view.cpp
-    commands/cmd_exit.cpp
-    commands/cmd_eyedropper.cpp
-    commands/cmd_fit_screen.cpp
-    commands/cmd_frame_properties.cpp
-    commands/cmd_frame_tag_properties.cpp
-    commands/cmd_fullscreen_mode.cpp
-    commands/cmd_fullscreen_preview.cpp
-    commands/cmd_goto_frame.cpp
-    commands/cmd_goto_layer.cpp
-    commands/cmd_goto_tab.cpp
-    commands/cmd_grid.cpp
-    commands/cmd_home.cpp
-    commands/cmd_invert_mask.cpp
-    commands/cmd_keyboard_shortcuts.cpp
-    commands/cmd_launch.cpp
-    commands/cmd_layer_lock.cpp
-    commands/cmd_layer_opacity.cpp
-    commands/cmd_layer_properties.cpp
-    commands/cmd_layer_visibility.cpp
-    commands/cmd_link_cels.cpp
-    commands/cmd_load_mask.cpp
-    commands/cmd_mask_by_color.cpp
-    commands/cmd_mask_content.cpp
-    commands/cmd_modify_selection.cpp
-    commands/cmd_move_cel.cpp
-    commands/cmd_move_mask.cpp
-    commands/cmd_new_brush.cpp
-    commands/cmd_new_frame_tag.cpp
-    commands/cmd_new_sprite_from_selection.cpp
-    commands/cmd_onionskin.cpp
-    commands/cmd_open_browser.cpp
-    commands/cmd_open_group.cpp
-    commands/cmd_open_in_folder.cpp
-    commands/cmd_open_with_app.cpp
-    commands/cmd_options.cpp
-    commands/cmd_palette_editor.cpp
-    commands/cmd_paste.cpp
-    commands/cmd_paste_text.cpp
-    commands/cmd_pixel_perfect_mode.cpp
-    commands/cmd_play_animation.cpp
-    commands/cmd_refresh.cpp
-    commands/cmd_enter_license.cpp
-    commands/cmd_remove_frame.cpp
-    commands/cmd_remove_frame_tag.cpp
-    commands/cmd_remove_slice.cpp
-    commands/cmd_reopen_closed_file.cpp
-    commands/cmd_repeat_last_export.cpp
-    commands/cmd_reselect_mask.cpp
-    commands/cmd_reverse_frames.cpp
-    commands/cmd_rotate.cpp
-    commands/cmd_save_mask.cpp
-    commands/cmd_save_palette.cpp
-    commands/cmd_select_palette.cpp
-    commands/cmd_scroll.cpp
-    commands/cmd_scroll_center.cpp
-    commands/cmd_select_tile.cpp
-    commands/cmd_set_color_selector.cpp
-    commands/cmd_set_ink_type.cpp
-    commands/cmd_set_loop_section.cpp
-    commands/cmd_set_palette.cpp
-    commands/cmd_set_palette_entry_size.cpp
-    commands/cmd_set_same_ink.cpp
-    commands/cmd_slice_properties.cpp
-    commands/cmd_sprite_properties.cpp
-    commands/cmd_swap_checkerboard_colors.cpp
-    commands/cmd_switch_colors.cpp
-    commands/cmd_symmetry_mode.cpp
-    commands/cmd_tiled_mode.cpp
-    commands/cmd_timeline.cpp
-    commands/cmd_toggle_preview.cpp
-    commands/cmd_toggle_tiles_mode.cpp
-    commands/cmd_toggle_timeline_thumbnails.cpp
-    commands/cmd_undo_history.cpp
-    commands/cmd_unlink_cel.cpp
-    commands/cmd_zoom.cpp
-    commands/filters/filter_preview.cpp
-    commands/filters/filter_target_buttons.cpp
-    commands/filters/filter_window.cpp
-    commands/screenshot.cpp
-    commands/set_playback_speed.cpp
-    commands/show_menu.cpp
-    commands/tileset_mode.cpp
-    commands/toggle_other_layers_opacity.cpp
-    commands/toggle_play_option.cpp
-    file_selector.cpp
-    modules/gfx.cpp
-    modules/gui.cpp
-    ui/alpha_entry.cpp
-    ui/alpha_slider.cpp
-    ui/app_menuitem.cpp
-    ui/backup_indicator.cpp
-    ui/browser_view.cpp
-    ui/brush_popup.cpp
-    ui/button_set.cpp
-    ui/color_bar.cpp
-    ui/color_button.cpp
-    ui/color_popup.cpp
-    ui/color_selector.cpp
-    ui/color_shades.cpp
-    ui/color_sliders.cpp
-    ui/color_spectrum.cpp
-    ui/color_tint_shade_tone.cpp
-    ui/color_wheel.cpp
-    ui/configure_timeline_popup.cpp
-    ui/context_bar.cpp
-    ui/dithering_selector.cpp
-    ui/doc_view.cpp
-    ui/drop_down_button.cpp
-    ui/dynamics_popup.cpp
-    ui/editor/brush_preview.cpp
-    ui/editor/delayed_mouse_move.cpp
-    ui/editor/dragging_value_state.cpp
-    ui/editor/drawing_state.cpp
-    ui/editor/editor.cpp
-    ui/editor/editor_observers.cpp
-    ui/editor/editor_render.cpp
-    ui/editor/editor_states_history.cpp
-    ui/editor/editor_view.cpp
-    ui/editor/moving_cel_state.cpp
-    ui/editor/moving_pixels_state.cpp
-    ui/editor/moving_selection_state.cpp
-    ui/editor/moving_slice_state.cpp
-    ui/editor/moving_symmetry_state.cpp
-    ui/editor/navigate_state.cpp
-    ui/editor/pivot_helpers.cpp
-    ui/editor/pixels_movement.cpp
-    ui/editor/play_state.cpp
-    ui/editor/scrolling_state.cpp
-    ui/editor/select_box_state.cpp
-    ui/editor/standby_state.cpp
-    ui/editor/state_with_wheel_behavior.cpp
-    ui/editor/transform_handles.cpp
-    ui/editor/zooming_state.cpp
-    ui/export_file_window.cpp
-    ui/expr_entry.cpp
-    ui/file_list.cpp
-    ui/file_list_view.cpp
-    ui/file_selector.cpp
-    ui/filename_field.cpp
-    ui/font_popup.cpp
-    ui/hex_color_entry.cpp
-    ui/home_view.cpp
-    ui/icon_button.cpp
-    ui/incompat_file_window.cpp
-    ui/input_chain.cpp
-    ui/keyboard_shortcuts.cpp
-    ui/main_menu_bar.cpp
-    ui/main_window.cpp
-    ui/notifications.cpp
-    ui/optional_alert.cpp
-    ui/palette_popup.cpp
-    ui/palette_view.cpp
-    ui/palettes_listbox.cpp
-    ui/popup_window_pin.cpp
-    ui/pref_widget.cpp
-    ui/preview_editor.cpp
-    ui/recent_listbox.cpp
-    ui/resources_listbox.cpp
-    ui/rgbmap_algorithm_selector.cpp
-    ui/sampling_selector.cpp
-    ui/search_entry.cpp
-    ui/select_accelerator.cpp
-    ui/selection_mode_field.cpp
-    ui/skin/font_data.cpp
-    ui/skin/skin_part.cpp
-    ui/skin/skin_property.cpp
-    ui/skin/skin_slider_property.cpp
-    ui/skin/skin_theme.cpp
-    ui/slice_window.cpp
-    ui/slider2.cpp
-    ui/status_bar.cpp
-    ui/tabs.cpp
-    ui/tag_window.cpp
-    ui/task_widget.cpp
-    ui/tile_button.cpp
-    ui/tileset_selector.cpp
-    ui/timeline/ani_controls.cpp
-    ui/timeline/timeline.cpp
-    ui/toolbar.cpp
-    ui/user_data_view.cpp
-    ui/workspace.cpp
-    ui/workspace_panel.cpp
-    ui/workspace_tabs.cpp
-    ui/zoom_entry.cpp
-    ui_context.cpp
-    widget_loader.cpp)
-  if(ENABLE_NEWS)
-    target_sources(app-lib PRIVATE
-      res/http_loader.cpp
-      ui/news_listbox.cpp)
-  endif()
-  if(ENABLE_DRM)
-    target_sources(app-lib PRIVATE
-      ui/enter_license.cpp
-      ui/aseprite_update.cpp)
-  endif()
-endif()
-
-if(ENABLE_SENTRY)
-  target_sources(app-lib PRIVATE sentry_wrapper.cpp)
-else()
-  target_sources(app-lib PRIVATE send_crash.cpp)
-endif()
-
+# Main app sources
 target_sources(app-lib PRIVATE
   active_site_handler.cpp
   app.cpp
+  app_brushes.cpp
+  app_menus.cpp
   check_update.cpp
   cli/app_options.cpp
   cli/cli_open_file.cpp
   cli/cli_processor.cpp
   cli/default_cli_delegate.cpp
   cli/preview_cli_delegate.cpp
+  closed_docs.cpp
   cmd.cpp
   cmd/add_cel.cpp
   cmd/add_frame.cpp
@@ -471,6 +286,7 @@ target_sources(app-lib PRIVATE
   cmd/clear_image.cpp
   cmd/clear_mask.cpp
   cmd/clear_rect.cpp
+  cmd/clear_slices.cpp
   cmd/configure_background.cpp
   cmd/convert_color_profile.cpp
   cmd/copy_cel.cpp
@@ -504,6 +320,7 @@ target_sources(app-lib PRIVATE
   cmd/set_cel_bounds.cpp
   cmd/set_cel_data.cpp
   cmd/set_cel_frame.cpp
+  cmd/set_cel_image.cpp
   cmd/set_cel_opacity.cpp
   cmd/set_cel_position.cpp
   cmd/set_cel_zindex.cpp
@@ -557,33 +374,131 @@ target_sources(app-lib PRIVATE
   color_picker.cpp
   color_spaces.cpp
   color_utils.cpp
+  commands/apply.cpp
+  commands/cmd_about.cpp
   commands/cmd_add_color.cpp
+  commands/cmd_advanced_mode.cpp
   commands/cmd_background_from_layer.cpp
+  commands/cmd_cancel.cpp
   commands/cmd_canvas_size.cpp
   commands/cmd_cel_opacity.cpp
+  commands/cmd_cel_properties.cpp
+  commands/cmd_change_brush.cpp
+  commands/cmd_change_color.cpp
   commands/cmd_change_pixel_format.cpp
+  commands/cmd_clear.cpp
+  commands/cmd_clear_cel.cpp
+  commands/cmd_clear_recent_files.cpp
+  commands/cmd_close_file.cpp
   commands/cmd_color_quantization.cpp
+  commands/cmd_contiguous_fill.cpp
+  commands/cmd_copy.cpp
+  commands/cmd_copy_cel.cpp
+  commands/cmd_copy_merged.cpp
   commands/cmd_crop.cpp
+  commands/cmd_cut.cpp
   commands/cmd_deselect_mask.cpp
+  commands/cmd_discard_brush.cpp
+  commands/cmd_duplicate_layer.cpp
+  commands/cmd_duplicate_slice.cpp
+  commands/cmd_duplicate_sprite.cpp
+  commands/cmd_duplicate_view.cpp
+  commands/cmd_enter_license.cpp
+  commands/cmd_exit.cpp
   commands/cmd_export_sprite_sheet.cpp
+  commands/cmd_eyedropper.cpp
   commands/cmd_fill_and_stroke.cpp
+  commands/cmd_fit_screen.cpp
   commands/cmd_flatten_layers.cpp
   commands/cmd_flip.cpp
+  commands/cmd_frame_properties.cpp
+  commands/cmd_frame_tag_properties.cpp
+  commands/cmd_fullscreen_mode.cpp
+  commands/cmd_fullscreen_preview.cpp
+  commands/cmd_goto_frame.cpp
+  commands/cmd_goto_layer.cpp
+  commands/cmd_goto_tab.cpp
+  commands/cmd_grid.cpp
+  commands/cmd_home.cpp
   commands/cmd_import_sprite_sheet.cpp
+  commands/cmd_invert_mask.cpp
+  commands/cmd_keyboard_shortcuts.cpp
+  commands/cmd_launch.cpp
   commands/cmd_layer_from_background.cpp
+  commands/cmd_layer_lock.cpp
+  commands/cmd_layer_opacity.cpp
+  commands/cmd_layer_properties.cpp
+  commands/cmd_layer_visibility.cpp
+  commands/cmd_link_cels.cpp
+  commands/cmd_load_mask.cpp
   commands/cmd_load_palette.cpp
   commands/cmd_mask_all.cpp
+  commands/cmd_mask_by_color.cpp
+  commands/cmd_mask_content.cpp
   commands/cmd_merge_down_layer.cpp
+  commands/cmd_modify_selection.cpp
+  commands/cmd_move_cel.cpp
+  commands/cmd_move_mask.cpp
+  commands/cmd_new_brush.cpp
   commands/cmd_new_file.cpp
   commands/cmd_new_frame.cpp
+  commands/cmd_new_frame_tag.cpp
   commands/cmd_new_layer.cpp
+  commands/cmd_new_sprite_from_selection.cpp
+  commands/cmd_onionskin.cpp
+  commands/cmd_open_browser.cpp
   commands/cmd_open_file.cpp
+  commands/cmd_open_group.cpp
+  commands/cmd_open_in_folder.cpp
+  commands/cmd_open_with_app.cpp
+  commands/cmd_options.cpp
+  commands/cmd_palette_editor.cpp
   commands/cmd_palette_size.cpp
+  commands/cmd_paste.cpp
+  commands/cmd_paste_text.cpp
+  commands/cmd_pixel_perfect_mode.cpp
+  commands/cmd_play_animation.cpp
+  commands/cmd_refresh.cpp
+  commands/cmd_remove_frame.cpp
+  commands/cmd_remove_frame_tag.cpp
   commands/cmd_remove_layer.cpp
+  commands/cmd_remove_slice.cpp
+  commands/cmd_reopen_closed_file.cpp
+  commands/cmd_repeat_last_export.cpp
+  commands/cmd_reselect_mask.cpp
+  commands/cmd_reverse_frames.cpp
+  commands/cmd_rotate.cpp
+  commands/cmd_run_command.cpp
   commands/cmd_save_file.cpp
+  commands/cmd_save_mask.cpp
+  commands/cmd_save_palette.cpp
+  commands/cmd_scroll.cpp
+  commands/cmd_scroll_center.cpp
+  commands/cmd_select_palette.cpp
+  commands/cmd_select_tile.cpp
+  commands/cmd_set_color_selector.cpp
+  commands/cmd_set_ink_type.cpp
+  commands/cmd_set_loop_section.cpp
+  commands/cmd_set_palette.cpp
+  commands/cmd_set_palette_entry_size.cpp
+  commands/cmd_set_same_ink.cpp
   commands/cmd_show.cpp
+  commands/cmd_slice_properties.cpp
+  commands/cmd_sprite_properties.cpp
   commands/cmd_sprite_size.cpp
+  commands/cmd_swap_checkerboard_colors.cpp
+  commands/cmd_switch_colors.cpp
+  commands/cmd_symmetry_mode.cpp
+  commands/cmd_tiled_mode.cpp
+  commands/cmd_timeline.cpp
+  commands/cmd_toggle_preview.cpp
+  commands/cmd_toggle_tiles_mode.cpp
+  commands/cmd_toggle_timeline_thumbnails.cpp
   commands/cmd_undo.cpp
+  commands/cmd_undo_history.cpp
+  commands/cmd_unlink_cel.cpp
+  commands/cmd_widget_zoo.cpp
+  commands/cmd_zoom.cpp
   commands/command.cpp
   commands/commands.cpp
   commands/convert_layer.cpp
@@ -600,20 +515,31 @@ target_sources(app-lib PRIVATE
   commands/filters/color_curve_editor.cpp
   commands/filters/convolution_matrix_stock.cpp
   commands/filters/filter_manager_impl.cpp
+  commands/filters/filter_preview.cpp
+  commands/filters/filter_target_buttons.cpp
+  commands/filters/filter_window.cpp
   commands/filters/filter_worker.cpp
   commands/move_colors_command.cpp
   commands/move_thing.cpp
   commands/move_tiles_command.cpp
   commands/new_params.cpp
   commands/quick_command.cpp
+  commands/screenshot.cpp
+  commands/set_playback_speed.cpp
+  commands/show_menu.cpp
+  commands/solo_layer.cpp
+  commands/tileset_mode.cpp
+  commands/toggle_other_layers_opacity.cpp
+  commands/toggle_play_option.cpp
+  commands/toggle_workspace_layout.cpp
   console.cpp
   context.cpp
   context_flags.cpp
   doc.cpp
   doc_api.cpp
+  doc_api_dnd_helper.cpp
   doc_diff.cpp
   doc_exporter.cpp
-  doc_range.cpp
   doc_range_ops.cpp
   doc_undo.cpp
   docs.cpp
@@ -626,10 +552,14 @@ target_sources(app-lib PRIVATE
   file/file_op_config.cpp
   file/palette_file.cpp
   file/split_filename.cpp
+  file_selector.cpp
   file_system.cpp
   filename_formatter.cpp
   flatten.cpp
-  font_path.cpp
+  fonts/font_data.cpp
+  fonts/font_info.cpp
+  fonts/font_path.cpp
+  fonts/fonts.cpp
   gui_xml.cpp
   i18n/strings.cpp
   i18n/xml_translator.cpp
@@ -640,6 +570,8 @@ target_sources(app-lib PRIVATE
   log.cpp
   loop_tag.cpp
   modules.cpp
+  modules/gfx.cpp
+  modules/gui.cpp
   modules/palettes.cpp
   pref/preferences.cpp
   recent_files.cpp
@@ -668,31 +600,144 @@ target_sources(app-lib PRIVATE
   tools/velocity.cpp
   transaction.cpp
   transformation.cpp
+  ui/alpha_entry.cpp
+  ui/alpha_slider.cpp
+  ui/app_menuitem.cpp
+  ui/backup_indicator.cpp
+  ui/best_fit_criteria_selector.cpp
+  ui/browser_view.cpp
+  ui/brush_popup.cpp
+  ui/button_set.cpp
+  ui/color_bar.cpp
+  ui/color_button.cpp
+  ui/color_popup.cpp
+  ui/color_selector.cpp
+  ui/color_shades.cpp
+  ui/color_sliders.cpp
+  ui/color_spectrum.cpp
+  ui/color_tint_shade_tone.cpp
+  ui/color_wheel.cpp
+  ui/configure_timeline_popup.cpp
+  ui/context_bar.cpp
+  ui/dithering_selector.cpp
+  ui/doc_view.cpp
+  ui/dock.cpp
+  ui/drop_down_button.cpp
+  ui/dynamics_popup.cpp
+  ui/editor/brush_preview.cpp
+  ui/editor/delayed_mouse_move.cpp
+  ui/editor/dragging_value_state.cpp
+  ui/editor/drawing_state.cpp
+  ui/editor/editor.cpp
+  ui/editor/editor_observers.cpp
+  ui/editor/editor_render.cpp
+  ui/editor/editor_states_history.cpp
+  ui/editor/editor_view.cpp
+  ui/editor/moving_cel_state.cpp
+  ui/editor/moving_pixels_state.cpp
+  ui/editor/moving_selection_state.cpp
+  ui/editor/moving_slice_state.cpp
+  ui/editor/moving_symmetry_state.cpp
+  ui/editor/navigate_state.cpp
+  ui/editor/pivot_helpers.cpp
+  ui/editor/pixels_movement.cpp
+  ui/editor/play_state.cpp
+  ui/editor/scrolling_state.cpp
+  ui/editor/select_box_state.cpp
+  ui/editor/select_text_box_state.cpp
+  ui/editor/standby_state.cpp
+  ui/editor/state_with_wheel_behavior.cpp
   ui/editor/tool_loop_impl.cpp
+  ui/editor/transform_handles.cpp
+  ui/editor/writing_text_state.cpp
+  ui/editor/zooming_state.cpp
+  ui/export_file_window.cpp
+  ui/expr_entry.cpp
+  ui/file_list.cpp
+  ui/file_list_view.cpp
+  ui/file_selector.cpp
+  ui/filename_field.cpp
+  ui/font_entry.cpp
+  ui/font_popup.cpp
+  ui/hex_color_entry.cpp
+  ui/home_view.cpp
+  ui/icon_button.cpp
+  ui/incompat_file_window.cpp
+  ui/input_chain.cpp
+  ui/key.cpp
+  ui/keyboard_shortcuts.cpp
   ui/layer_frame_comboboxes.cpp
+  ui/layout.cpp
+  ui/layouts.cpp
+  ui/layout_selector.cpp
+  ui/main_menu_bar.cpp
+  ui/main_window.cpp
+  ui/mini_help_button.cpp
+  ui/notifications.cpp
+  ui/optional_alert.cpp
+  ui/palette_popup.cpp
+  ui/palette_view.cpp
+  ui/palettes_listbox.cpp
+  ui/popup_window_pin.cpp
+  ui/pref_widget.cpp
+  ui/preview_editor.cpp
+  ui/recent_listbox.cpp
+  ui/resources_listbox.cpp
+  ui/rgbmap_algorithm_selector.cpp
+  ui/sampling_selector.cpp
+  ui/search_entry.cpp
+  ui/select_shortcut.cpp
+  ui/selection_mode_field.cpp
+  ui/skin/skin_part.cpp
+  ui/skin/skin_property.cpp
+  ui/skin/skin_slider_property.cpp
+  ui/skin/skin_theme.cpp
+  ui/slice_window.cpp
+  ui/slider2.cpp
+  ui/status_bar.cpp
+  ui/tabs.cpp
+  ui/tag_window.cpp
+  ui/task_widget.cpp
+  ui/tile_button.cpp
+  ui/tileset_selector.cpp
+  ui/timeline/ani_controls.cpp
+  ui/timeline/doc_providers.cpp
+  ui/timeline/timeline.cpp
+  ui/toolbar.cpp
+  ui/user_data_view.cpp
+  ui/window_with_hand.cpp
+  ui/workspace.cpp
+  ui/workspace_panel.cpp
+  ui/workspace_tabs.cpp
+  ui/zoom_entry.cpp
+  ui_context.cpp
   util/autocrop.cpp
   util/buffer_region.cpp
   util/cel_ops.cpp
   util/clipboard.cpp
   util/clipboard_native.cpp
+  util/conversion_to_image.cpp
   util/conversion_to_surface.cpp
   util/expand_cel_canvas.cpp
   util/filetoks.cpp
-  util/freetype_utils.cpp
   util/layer_boundaries.cpp
   util/layer_utils.cpp
   util/msk_file.cpp
   util/new_image_from_mask.cpp
+  util/open_file_job.cpp
   util/pal_ops.cpp
   util/pic_file.cpp
   util/pixel_ratio.cpp
-  util/range_utils.cpp
   util/readable_time.cpp
+  util/render_text.cpp
   util/resize_image.cpp
   util/shader_helpers.cpp
+  util/slice_utils.cpp
   util/tile_flags_utils.cpp
+  util/tiled_mode.cpp
   util/tileset_utils.cpp
   util/wrap_point.cpp
+  widget_loader.cpp
   xml_document.cpp
   xml_exception.cpp)
 
@@ -700,11 +745,35 @@ if(TARGET generated_version)
   add_dependencies(app-lib generated_version)
 endif()
 
+if(WIN32)
+  target_sources(app-lib PRIVATE
+    win/file_associations.cpp
+    win/thumbnails.cpp)
+endif()
+
+if(ENABLE_NEWS)
+  target_compile_definitions(app-lib PUBLIC -DENABLE_NEWS)
+  target_sources(app-lib PRIVATE
+    res/http_loader.cpp
+    ui/news_listbox.cpp)
+endif()
+
+if(ENABLE_DRM)
+  target_link_libraries(app-lib drm-lib)
+  target_compile_definitions(app-lib PUBLIC
+    -DENABLE_DRM
+    -DENABLE_SAVE)
+  target_sources(app-lib PRIVATE
+    ui/enter_license.cpp
+    ui/aseprite_update.cpp)
+endif()
+
 target_link_libraries(app-lib
   laf-base
   cfg-lib
   clip
   doc-lib
+  view-lib
   dio-lib
   filters-lib
   fixmath-lib
@@ -712,32 +781,39 @@ target_link_libraries(app-lib
   tga-lib
   laf-gfx
   render-lib
-  laf-ft
+  laf-dlgs
   laf-os
+  laf-text
   ui-lib
   ver-lib
+  updater-lib
   undo
   ${CMARK_LIBRARIES}
   ${TINYXML_LIBRARY}
-  ${JPEG_LIBRARIES}
+  ${TINYEXIF_LIBRARY}
   ${GIF_LIBRARIES}
   ${PNG_LIBRARIES}
-  ${WEBP_LIBRARIES}
   ${ZLIB_LIBRARIES}
-  ${FREETYPE_LIBRARIES}
-  ${HARFBUZZ_LIBRARIES}
+  libjpeg-turbo
   json11
   archive_static
   fmt
   tinyexpr
   qoi)
 
-if(ENABLE_PSD)
-  target_link_libraries(app-lib psd)
+if(ENABLE_WEBP AND WEBP_FOUND)
+  target_link_libraries(app-lib ${WEBP_LIBRARIES})
+  target_include_directories(app-lib PUBLIC ${WEBP_INCLUDE_DIR})
 endif()
 
-if(ENABLE_DRM)
-  target_link_libraries(app-lib drm-lib)
+if(FREETYPE_FOUND)
+  target_link_libraries(app-lib ${FREETYPE_LIBRARIES})
+  target_include_directories(app-lib PUBLIC ${FREETYPE_INCLUDE_DIRS})
+endif()
+
+if(HARFBUZZ_FOUND)
+  target_link_libraries(app-lib ${HARFBUZZ_LIBRARIES})
+  target_include_directories(app-lib PUBLIC ${HARFBUZZ_INCLUDE_DIRS})
 endif()
 
 # Directory where generated files by "gen" utility will stay.
@@ -747,22 +823,7 @@ if(REQUIRE_CURL)
   target_link_libraries(app-lib net-lib)
 endif()
 
-if(ENABLE_SCRIPTING)
-  target_link_libraries(app-lib lua lauxlib lualib)
-
-  if(ENABLE_WEBSOCKET)
-    target_link_libraries(app-lib ixwebsocket)
-  endif()
-  
-  if(ENABLE_FFI)
-    target_link_libraries(app-lib cffi-lua)
-  endif()
-endif()
-
-if(ENABLE_UPDATER)
-  target_link_libraries(app-lib updater-lib)
-endif()
-
+# Enable loading Steam API
 if(ENABLE_STEAM)
   # We need the ENABLE_STEAM flag in main module too so AppOptions are
   # equal in both modules, app-lib and main (that's why this flag is
@@ -771,6 +832,7 @@ if(ENABLE_STEAM)
   target_link_libraries(app-lib steam-lib)
 endif()
 
+# Report crashes using Sentry
 if(ENABLE_SENTRY)
   target_compile_definitions(app-lib PUBLIC
     -DENABLE_SENTRY
@@ -779,4 +841,13 @@ if(ENABLE_SENTRY)
     -DSENTRY_ENV="${SENTRY_ENV}")
   add_subdirectory(${SENTRY_DIR} sentry)
   target_link_libraries(app-lib sentry)
+  target_sources(app-lib PRIVATE sentry_wrapper.cpp)
+else()
+  target_sources(app-lib PRIVATE send_crash.cpp)
+endif()
+
+# When we use the laf-dlgs-proc, aseprite depends on it to show the
+# native file dialog.
+if(LAF_WITH_DLGS_PROC)
+  add_dependencies(app-lib laf-dlgs-proc)
 endif()

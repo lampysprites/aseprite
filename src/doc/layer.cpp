@@ -1,12 +1,12 @@
 // Aseprite Document Library
-// Copyright (C) 2019-2021  Igara Studio S.A.
+// Copyright (C) 2019-2026  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "doc/layer.h"
@@ -14,8 +14,10 @@
 #include "doc/cel.h"
 #include "doc/grid.h"
 #include "doc/image.h"
+#include "doc/layer_tilemap.h"
 #include "doc/primitives.h"
 #include "doc/sprite.h"
+#include "doc/tilesets.h"
 
 #include <algorithm>
 #include <cstring>
@@ -26,35 +28,71 @@ Layer::Layer(ObjectType type, Sprite* sprite)
   : WithUserData(type)
   , m_sprite(sprite)
   , m_parent(NULL)
-  , m_flags(LayerFlags(
-      int(LayerFlags::Visible) |
-      int(LayerFlags::Editable)))
+  , m_flags(LayerFlags(int(LayerFlags::Visible) | int(LayerFlags::Editable)))
+  , m_blendmode(BlendMode::NORMAL)
+  , m_opacity(255)
 {
-  ASSERT(type == ObjectType::LayerImage ||
-         type == ObjectType::LayerGroup ||
-         type == ObjectType::LayerTilemap);
-
   setName("Layer");
 }
 
 Layer::~Layer()
 {
+  destroyAllCels();
+  destroyAllLayers();
 }
 
 int Layer::getMemSize() const
 {
-  return sizeof(Layer);
+  int size = sizeof(Layer);
+
+  for (const Cel* cel : m_cels) {
+    if (cel->link()) // Skip link
+      continue;
+    size += cel->getMemSize();
+  }
+
+  for (const Layer* layer : m_layers)
+    size += layer->getMemSize();
+
+  return size;
+}
+
+void Layer::suspendObject()
+{
+  for (Layer* child : m_layers)
+    child->suspendObject();
+
+  CelIterator it = getCelBegin();
+  CelIterator end = getCelEnd();
+  for (; it != end; ++it) {
+    Cel* cel = *it;
+    cel->suspendObject();
+  }
+
+  WithUserData::suspendObject();
+}
+
+void Layer::restoreObject()
+{
+  WithUserData::restoreObject();
+
+  CelIterator it = getCelBegin();
+  CelIterator end = getCelEnd();
+  for (; it != end; ++it) {
+    Cel* cel = *it;
+    cel->restoreObject();
+  }
+
+  for (Layer* child : m_layers)
+    child->restoreObject();
 }
 
 Layer* Layer::getPrevious() const
 {
   if (m_parent) {
-    auto it =
-      std::find(m_parent->layers().begin(),
-                m_parent->layers().end(), this);
+    auto it = std::find(m_parent->layers().begin(), m_parent->layers().end(), this);
 
-    if (it != m_parent->layers().end() &&
-        it != m_parent->layers().begin()) {
+    if (it != m_parent->layers().end() && it != m_parent->layers().begin()) {
       it--;
       return *it;
     }
@@ -65,9 +103,7 @@ Layer* Layer::getPrevious() const
 Layer* Layer::getNext() const
 {
   if (m_parent) {
-    auto it =
-      std::find(m_parent->layers().begin(),
-                m_parent->layers().end(), this);
+    auto it = std::find(m_parent->layers().begin(), m_parent->layers().end(), this);
 
     if (it != m_parent->layers().end()) {
       it++;
@@ -82,16 +118,15 @@ Layer* Layer::getPreviousBrowsable() const
 {
   // Go to children
   if (isBrowsable())
-    return static_cast<const LayerGroup*>(this)->lastLayer();
+    return lastLayer();
 
   // Go to previous layer
   if (Layer* prev = getPrevious())
     return prev;
 
   // Go to previous layer in the parent
-  LayerGroup* parent = this->parent();
-  while (parent != sprite()->root() &&
-         !parent->getPrevious()) {
+  Layer* parent = this->parent();
+  while (parent != sprite()->root() && !parent->getPrevious()) {
     parent = parent->parent();
   }
   return parent->getPrevious();
@@ -103,7 +138,7 @@ Layer* Layer::getNextBrowsable() const
   if (Layer* next = getNext()) {
     // Go to children
     while (next->isBrowsable()) {
-      Layer* firstChild = static_cast<const LayerGroup*>(next)->firstLayer();
+      Layer* firstChild = next->firstLayer();
       if (!firstChild)
         break;
       next = firstChild;
@@ -121,17 +156,16 @@ Layer* Layer::getNextBrowsable() const
 Layer* Layer::getPreviousInWholeHierarchy() const
 {
   // Go to children
-  if (isGroup() && static_cast<const LayerGroup*>(this)->layersCount() > 0)
-    return static_cast<const LayerGroup*>(this)->lastLayer();
+  if (layersCount() > 0)
+    return lastLayer();
 
   // Go to previous layer
   if (Layer* prev = getPrevious())
     return prev;
 
   // Go to previous layer in the parent
-  LayerGroup* parent = this->parent();
-  while (parent != sprite()->root() &&
-         !parent->getPrevious()) {
+  Layer* parent = this->parent();
+  while (parent != sprite()->root() && !parent->getPrevious()) {
     parent = parent->parent();
   }
   return parent->getPrevious();
@@ -142,8 +176,8 @@ Layer* Layer::getNextInWholeHierarchy() const
   // Go to next layer
   if (Layer* next = getNext()) {
     // Go to children
-    while (next->isGroup() && static_cast<const LayerGroup*>(next)->layersCount() > 0) {
-      Layer* firstChild = static_cast<const LayerGroup*>(next)->firstLayer();
+    while (next->hasSublayers() && next->layersCount() > 0) {
+      Layer* firstChild = next->firstLayer();
       if (!firstChild)
         break;
       next = firstChild;
@@ -188,8 +222,7 @@ bool Layer::canEditPixels() const
 {
   const Layer* layer = this;
   while (layer) {
-    if (!layer->isVisible() ||
-        !layer->isEditable() ||
+    if (!layer->isVisible() || !layer->isEditable() ||
         layer->isReference()) { // Cannot edit pixels from reference layers
       return false;
     }
@@ -211,8 +244,7 @@ bool Layer::hasAncestor(const Layer* ancestor) const
 
 Grid Layer::grid() const
 {
-  gfx::Rect rc = (m_sprite ? m_sprite->gridBounds():
-                             doc::Sprite::DefaultGridBounds());
+  gfx::Rect rc = (m_sprite ? m_sprite->gridBounds() : doc::Sprite::DefaultGridBounds());
   doc::Grid grid = Grid(rc.size());
   grid.origin(gfx::Point(rc.x % rc.w, rc.y % rc.h));
   return grid;
@@ -220,101 +252,57 @@ Grid Layer::grid() const
 
 Cel* Layer::cel(frame_t frame) const
 {
+  const CelConstIterator it = findCelIterator(frame);
+  if (it != getCelEnd())
+    return *it;
   return nullptr;
 }
 
-//////////////////////////////////////////////////////////////////////
-// LayerImage class
-
-LayerImage::LayerImage(ObjectType type, Sprite* sprite)
-  : Layer(type, sprite)
-  , m_blendmode(BlendMode::NORMAL)
-  , m_opacity(255)
+void Layer::destroyAllCels()
 {
-}
-
-LayerImage::LayerImage(Sprite* sprite)
-  : LayerImage(ObjectType::LayerImage, sprite)
-{
-}
-
-LayerImage::~LayerImage()
-{
-  destroyAllCels();
-}
-
-int LayerImage::getMemSize() const
-{
-  int size = sizeof(LayerImage);
-  CelConstIterator it = getCelBegin();
-  CelConstIterator end = getCelEnd();
-
-  for (; it != end; ++it) {
-    const Cel* cel = *it;
-    size += cel->getMemSize();
-
-    const Image* image = cel->image();
-    size += image->getMemSize();
-  }
-
-  return size;
-}
-
-void LayerImage::destroyAllCels()
-{
-  CelIterator it = getCelBegin();
-  CelIterator end = getCelEnd();
-
-  for (; it != end; ++it) {
-    Cel* cel = *it;
+  for (Cel* cel : m_cels)
     delete cel;
-  }
   m_cels.clear();
 }
 
-Cel* LayerImage::cel(frame_t frame) const
+void Layer::destroyAllLayers()
 {
-  CelConstIterator it = findCelIterator(frame);
-  if (it != getCelEnd())
-    return *it;
-  else
-    return nullptr;
+  for (Layer* layer : m_layers)
+    delete layer;
+  m_layers.clear();
 }
 
-void LayerImage::getCels(CelList& cels) const
+void Layer::getCels(CelList& cels) const
 {
-  CelConstIterator it = getCelBegin();
-  CelConstIterator end = getCelEnd();
+  for (Cel* cel : m_cels)
+    cels.push_back(cel);
 
-  for (; it != end; ++it)
-    cels.push_back(*it);
+  for (const Layer* layer : m_layers)
+    layer->getCels(cels);
 }
 
-Cel* LayerImage::getLastCel() const
+Cel* Layer::getLastCel() const
 {
   if (!m_cels.empty())
     return m_cels.back();
-  else
-    return NULL;
+  return nullptr;
 }
 
-CelConstIterator LayerImage::findCelIterator(frame_t frame) const
+CelConstIterator Layer::findCelIterator(frame_t frame) const
 {
-  CelIterator it = const_cast<LayerImage*>(this)->findCelIterator(frame);
+  const CelIterator it = const_cast<Layer*>(this)->findCelIterator(frame);
   return CelConstIterator(it);
 }
 
-CelIterator LayerImage::findCelIterator(frame_t frame)
+CelIterator Layer::findCelIterator(frame_t frame)
 {
   auto first = getCelBegin();
   auto end = getCelEnd();
 
   // Here we use a binary search to find the first cel equal to "frame" (or after frame)
-  first = std::lower_bound(
-    first, end, nullptr,
-    [frame](Cel* cel, Cel*) -> bool {
-      return cel->frame() < frame;
-    });
+  first = std::lower_bound(first, end, nullptr, [frame](Cel* cel, Cel*) -> bool {
+    return cel->frame() < frame;
+  });
 
   // We return the iterator only if it's an exact match
   if (first != end && (*first)->frame() == frame)
@@ -323,29 +311,24 @@ CelIterator LayerImage::findCelIterator(frame_t frame)
     return end;
 }
 
-CelIterator LayerImage::findFirstCelIteratorAfter(frame_t firstAfterFrame)
+CelIterator Layer::findFirstCelIteratorAfter(frame_t firstAfterFrame)
 {
   auto first = getCelBegin();
   auto end = getCelEnd();
 
   // Here we use a binary search to find the first cel after the given frame
-  first = std::lower_bound(
-    first, end, nullptr,
-    [firstAfterFrame](Cel* cel, Cel*) -> bool {
-      return cel->frame() <= firstAfterFrame;
-    });
+  first = std::lower_bound(first, end, nullptr, [firstAfterFrame](Cel* cel, Cel*) -> bool {
+    return cel->frame() <= firstAfterFrame;
+  });
 
   return first;
 }
 
-void LayerImage::addCel(Cel* cel)
+void Layer::addCel(Cel* cel)
 {
   ASSERT(cel);
   ASSERT(cel->data() && "The cel doesn't contain CelData");
-  ASSERT(cel->image());
   ASSERT(sprite());
-  ASSERT(cel->image()->pixelFormat() == sprite()->pixelFormat() ||
-         cel->image()->pixelFormat() == IMAGE_TILEMAP);
 
   CelIterator it = findFirstCelIteratorAfter(cel->frame());
   m_cels.insert(it, cel);
@@ -359,7 +342,7 @@ void LayerImage::addCel(Cel* cel)
  * It doesn't destroy the cel, you have to delete it after calling
  * this routine.
  */
-void LayerImage::removeCel(Cel* cel)
+void Layer::removeCel(Cel* cel)
 {
   ASSERT(cel);
   CelIterator it = findCelIterator(cel->frame());
@@ -370,12 +353,227 @@ void LayerImage::removeCel(Cel* cel)
   cel->setParentLayer(NULL);
 }
 
-void LayerImage::moveCel(Cel* cel, frame_t frame)
+void Layer::moveCel(Cel* cel, frame_t frame)
 {
   removeCel(cel);
   cel->setFrame(frame);
-  cel->incrementVersion();      // TODO this should be in app::cmd module
+  cel->incrementVersion(); // TODO this should be in app::cmd module
   addCel(cel);
+}
+
+void Layer::displaceFrames(frame_t fromThis, frame_t delta)
+{
+  Sprite* sprite = this->sprite();
+
+  if (delta > 0) {
+    for (frame_t c = sprite->lastFrame(); c >= fromThis; --c) {
+      if (Cel* cel = this->cel(c))
+        moveCel(cel, c + delta);
+    }
+  }
+  else {
+    for (frame_t c = fromThis; c <= sprite->lastFrame(); ++c) {
+      if (Cel* cel = this->cel(c))
+        moveCel(cel, c + delta);
+    }
+  }
+
+  for (Layer* layer : m_layers)
+    layer->displaceFrames(fromThis, delta);
+}
+
+Layer* Layer::firstLayerInWholeHierarchy() const
+{
+  Layer* layer = firstLayer();
+  if (layer) {
+    while (layer->layersCount() > 0)
+      layer = layer->firstLayer();
+  }
+  return layer;
+}
+
+void Layer::allLayers(LayerList& list) const
+{
+  for (Layer* child : m_layers) {
+    if (child->hasSublayers())
+      child->allLayers(list);
+
+    list.push_back(child);
+  }
+}
+
+layer_t Layer::allLayersCount() const
+{
+  layer_t count = 0;
+  for (Layer* child : m_layers) {
+    count += child->allLayersCount();
+    ++count;
+  }
+  return count;
+}
+
+bool Layer::hasVisibleReferenceLayers() const
+{
+  for (Layer* child : m_layers) {
+    if ((child->isReference() && child->isVisible()) ||
+        (child->hasSublayers() && child->hasVisibleReferenceLayers()))
+      return true;
+  }
+  return false;
+}
+
+void Layer::allVisibleLayers(LayerList& list) const
+{
+  for (Layer* child : m_layers) {
+    if (!child->isVisible())
+      continue;
+
+    if (child->hasSublayers())
+      child->allVisibleLayers(list);
+
+    list.push_back(child);
+  }
+}
+
+void Layer::allVisibleReferenceLayers(LayerList& list) const
+{
+  for (Layer* child : m_layers) {
+    if (!child->isVisible())
+      continue;
+
+    if (child->hasSublayers())
+      child->allVisibleReferenceLayers(list);
+
+    if (!child->isReference())
+      continue;
+
+    list.push_back(child);
+  }
+}
+
+void Layer::allBrowsableLayers(LayerList& list) const
+{
+  for (Layer* child : m_layers) {
+    if (child->isBrowsable())
+      child->allBrowsableLayers(list);
+
+    list.push_back(child);
+  }
+}
+
+void Layer::allTilemaps(LayerList& list) const
+{
+  for (Layer* child : m_layers) {
+    if (child->hasSublayers())
+      child->allTilemaps(list);
+
+    if (child->isTilemap())
+      list.push_back(child);
+  }
+}
+
+std::string Layer::visibleLayerHierarchyAsString(const std::string& indent) const
+{
+  std::string str;
+  for (Layer* child : m_layers) {
+    if (!child->isVisible())
+      continue;
+
+    str += indent + child->name() + (child->isGroup() ? "/" : "") + "\n";
+    if (child->hasSublayers())
+      str += child->visibleLayerHierarchyAsString(indent + "  ");
+  }
+  return str;
+}
+
+void Layer::addLayer(Layer* layer)
+{
+  m_layers.push_back(layer);
+
+  layer->setParent(this);
+  if (!isGroup())
+    setCollapsed(m_layers.empty());
+}
+
+void Layer::removeLayer(Layer* layer)
+{
+  auto it = std::find(m_layers.begin(), m_layers.end(), layer);
+  ASSERT(it != m_layers.end());
+  m_layers.erase(it);
+
+  layer->setParent(nullptr);
+  if (!isGroup())
+    setCollapsed(m_layers.empty());
+}
+
+void Layer::insertLayer(Layer* layer, Layer* after)
+{
+  auto after_it = m_layers.begin();
+  if (after) {
+    after_it = std::find(m_layers.begin(), m_layers.end(), after);
+    if (after_it != m_layers.end())
+      ++after_it;
+  }
+  m_layers.insert(after_it, layer);
+
+  layer->setParent(this);
+  if (!isGroup())
+    setCollapsed(m_layers.empty());
+}
+
+void Layer::insertLayerBefore(Layer* layer, Layer* before)
+{
+  auto before_it = m_layers.end();
+  if (before) {
+    before_it = std::find(m_layers.begin(), m_layers.end(), before);
+  }
+  m_layers.insert(before_it, layer);
+
+  layer->setParent(this);
+  if (!isGroup())
+    setCollapsed(m_layers.empty());
+}
+
+void Layer::stackLayer(Layer* layer, Layer* after)
+{
+  ASSERT(layer != after);
+  if (layer == after)
+    return;
+
+  removeLayer(layer);
+  insertLayer(layer, after);
+}
+
+layer_t Layer::getLayerIndex(const Layer* layer, layer_t& index) const
+{
+  for (Layer* child : this->layers()) {
+    if ((child->hasSublayers() && child->getLayerIndex(layer, index) != -1) || (child == layer)) {
+      return index;
+    }
+    index++;
+  }
+  return -1;
+}
+
+layer_t Layer::getLayerIndex(const Layer* layer) const
+{
+  layer_t index = 0;
+  return this->getLayerIndex(layer, index);
+}
+
+//////////////////////////////////////////////////////////////////////
+// LayerImage class
+
+LayerImage::LayerImage(ObjectType type, Sprite* sprite) : Layer(type, sprite)
+{
+}
+
+LayerImage::LayerImage(Sprite* sprite) : LayerImage(ObjectType::LayerImage, sprite)
+{
+}
+
+LayerImage::~LayerImage()
+{
 }
 
 /**
@@ -396,198 +594,16 @@ void LayerImage::configureAsBackground()
   sprite()->root()->stackLayer(this, NULL);
 }
 
-void LayerImage::displaceFrames(frame_t fromThis, frame_t delta)
-{
-  Sprite* sprite = this->sprite();
-
-  if (delta > 0) {
-    for (frame_t c=sprite->lastFrame(); c>=fromThis; --c) {
-      if (Cel* cel = this->cel(c))
-        moveCel(cel, c+delta);
-    }
-  }
-  else {
-    for (frame_t c=fromThis; c<=sprite->lastFrame(); ++c) {
-      if (Cel* cel = this->cel(c))
-        moveCel(cel, c+delta);
-    }
-  }
-}
-
 //////////////////////////////////////////////////////////////////////
 // LayerGroup class
 
-LayerGroup::LayerGroup(Sprite* sprite)
-  : Layer(ObjectType::LayerGroup, sprite)
+LayerGroup::LayerGroup(Sprite* sprite) : Layer(ObjectType::LayerGroup, sprite)
 {
   setName("Group");
 }
 
 LayerGroup::~LayerGroup()
 {
-  destroyAllLayers();
-}
-
-void LayerGroup::destroyAllLayers()
-{
-  for (Layer* layer : m_layers)
-    delete layer;
-  m_layers.clear();
-}
-
-int LayerGroup::getMemSize() const
-{
-  int size = sizeof(LayerGroup);
-
-  for (const Layer* layer : m_layers) {
-    size += layer->getMemSize();
-  }
-
-  return size;
-}
-
-Layer* LayerGroup::firstLayerInWholeHierarchy() const
-{
-  Layer* layer = firstLayer();
-  if (layer) {
-    while (layer->isGroup() &&
-           static_cast<LayerGroup*>(layer)->layersCount() > 0) {
-      layer = static_cast<LayerGroup*>(layer)->firstLayer();
-    }
-  }
-  return layer;
-}
-
-void LayerGroup::allLayers(LayerList& list) const
-{
-  for (Layer* child : m_layers) {
-    if (child->isGroup())
-      static_cast<LayerGroup*>(child)->allLayers(list);
-
-    list.push_back(child);
-  }
-}
-
-layer_t LayerGroup::allLayersCount() const
-{
-  layer_t count = 0;
-  for (Layer* child : m_layers) {
-    if (child->isGroup())
-      count += static_cast<LayerGroup*>(child)->allLayersCount();
-    ++count;
-  }
-  return count;
-}
-
-bool LayerGroup::hasVisibleReferenceLayers() const
-{
-  for (Layer* child : m_layers) {
-    if ((child->isReference() && child->isVisible())
-        || (child->isGroup()
-            && static_cast<LayerGroup*>(child)->hasVisibleReferenceLayers()))
-      return true;
-  }
-  return false;
-}
-
-void LayerGroup::allVisibleLayers(LayerList& list) const
-{
-  for (Layer* child : m_layers) {
-    if (!child->isVisible())
-      continue;
-
-    if (child->isGroup())
-      static_cast<LayerGroup*>(child)->allVisibleLayers(list);
-
-    list.push_back(child);
-  }
-}
-
-void LayerGroup::allVisibleReferenceLayers(LayerList& list) const
-{
-  for (Layer* child : m_layers) {
-    if (!child->isVisible())
-      continue;
-
-    if (child->isGroup())
-      static_cast<LayerGroup*>(child)->allVisibleReferenceLayers(list);
-
-    if (!child->isReference())
-      continue;
-
-    list.push_back(child);
-  }
-}
-
-void LayerGroup::allBrowsableLayers(LayerList& list) const
-{
-  for (Layer* child : m_layers) {
-    if (child->isBrowsable())
-      static_cast<LayerGroup*>(child)->allBrowsableLayers(list);
-
-    list.push_back(child);
-  }
-}
-
-void LayerGroup::allTilemaps(LayerList& list) const
-{
-  for (Layer* child : m_layers) {
-    if (child->isGroup())
-      static_cast<LayerGroup*>(child)->allTilemaps(list);
-
-    if (child->isTilemap())
-      list.push_back(child);
-  }
-}
-
-void LayerGroup::getCels(CelList& cels) const
-{
-  for (const Layer* layer : m_layers)
-    layer->getCels(cels);
-}
-
-void LayerGroup::addLayer(Layer* layer)
-{
-  m_layers.push_back(layer);
-  layer->setParent(this);
-}
-
-void LayerGroup::removeLayer(Layer* layer)
-{
-  auto it = std::find(m_layers.begin(), m_layers.end(), layer);
-  ASSERT(it != m_layers.end());
-  m_layers.erase(it);
-
-  layer->setParent(nullptr);
-}
-
-void LayerGroup::insertLayer(Layer* layer, Layer* after)
-{
-  auto after_it = m_layers.begin();
-  if (after) {
-    after_it = std::find(m_layers.begin(), m_layers.end(), after);
-    if (after_it != m_layers.end())
-      ++after_it;
-  }
-  m_layers.insert(after_it, layer);
-
-  layer->setParent(this);
-}
-
-void LayerGroup::stackLayer(Layer* layer, Layer* after)
-{
-  ASSERT(layer != after);
-  if (layer == after)
-    return;
-
-  removeLayer(layer);
-  insertLayer(layer, after);
-}
-
-void LayerGroup::displaceFrames(frame_t fromThis, frame_t delta)
-{
-  for (Layer* layer : m_layers)
-    layer->displaceFrames(fromThis, delta);
 }
 
 } // namespace doc

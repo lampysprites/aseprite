@@ -1,4 +1,5 @@
 // Aseprite
+// Copyright (c) 2025  Igara Studio S.A.
 // Copyright (C) 2001-2016  David Capello
 //
 // This program is distributed under the terms of
@@ -10,41 +11,32 @@
 
 #include "app/cmd.h"
 #include "app/cmd/with_layer.h"
+#include "app/cmd/with_suspended.h"
+#include "doc/layer.h"
 
-#include <sstream>
+namespace app { namespace cmd {
+using namespace doc;
 
-namespace doc {
-  class Layer;
-}
+class AddLayer : public Cmd {
+public:
+  AddLayer(Layer* group, Layer* newLayer, Layer* afterThis);
 
-namespace app {
-namespace cmd {
-  using namespace doc;
+protected:
+  void onExecute() override;
+  void onUndo() override;
+  void onRedo() override;
+  size_t onMemSize() const override { return sizeof(*this) + m_suspendedLayer.size(); }
 
-  class AddLayer : public Cmd {
-  public:
-    AddLayer(Layer* group, Layer* newLayer, Layer* afterThis);
+private:
+  void addLayer(Layer* group, Layer* newLayer, Layer* afterThis);
+  void removeLayer(Layer* group, Layer* layer);
 
-  protected:
-    void onExecute() override;
-    void onUndo() override;
-    void onRedo() override;
-    size_t onMemSize() const override {
-      return sizeof(*this) + m_size;
-    }
+  WithLayer m_group;
+  WithLayer m_newLayer;
+  WithLayer m_afterThis;
+  WithSuspended<doc::Layer*> m_suspendedLayer;
+};
 
-  private:
-    void addLayer(Layer* group, Layer* newLayer, Layer* afterThis);
-    void removeLayer(Layer* group, Layer* layer);
-
-    WithLayer m_group;
-    WithLayer m_newLayer;
-    WithLayer m_afterThis;
-    size_t m_size;
-    std::stringstream m_stream;
-  };
-
-} // namespace cmd
-} // namespace app
+}} // namespace app::cmd
 
 #endif

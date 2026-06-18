@@ -1,11 +1,10 @@
 // Desktop Integration
-// Copyright (c) 2022  Igara Studio S.A.
+// Copyright (c) 2022-present  Igara Studio S.A.
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
-#include "thumbnail.h"
-
+#include "app/file_system.h"
 #include "dio/decode_delegate.h"
 #include "dio/decode_file.h"
 #include "dio/file_interface.h"
@@ -13,8 +12,7 @@
 #include "render/render.h"
 
 #include <Cocoa/Cocoa.h>
-
-#include <algorithm>
+#include <QuickLookThumbnailing/QuickLookThumbnailing.h>
 
 namespace desktop {
 
@@ -22,13 +20,11 @@ namespace {
 
 class DecodeDelegate : public dio::DecodeDelegate {
 public:
-  DecodeDelegate() : m_sprite(nullptr) { }
+  DecodeDelegate() : m_sprite(nullptr) {}
   ~DecodeDelegate() { delete m_sprite; }
 
   bool decodeOneFrame() override { return true; }
-  void onSprite(doc::Sprite* sprite) override {
-    m_sprite = sprite;
-  }
+  void onSprite(doc::Sprite* sprite) override { m_sprite = sprite; }
 
   doc::Sprite* sprite() { return m_sprite; }
 
@@ -38,25 +34,16 @@ private:
 
 class StreamAdaptor : public dio::FileInterface {
 public:
-  StreamAdaptor(NSData* data)
-    : m_data(data)
-    , m_ok(m_data != nullptr)
-    , m_pos(0) {
-  }
+  StreamAdaptor(NSData* data) : m_data(data), m_ok(m_data != nullptr), m_pos(0) {}
 
-  bool ok() const {
-    return m_ok;
-  }
+  bool ok() const override { return m_ok; }
 
-  size_t tell() {
-    return m_pos;
-  }
+  size_t tell() override { return m_pos; }
 
-  void seek(size_t absPos) {
-    m_pos = absPos;
-  }
+  void seek(size_t absPos) override { m_pos = absPos; }
 
-  uint8_t read8() {
+  uint8_t read8() override
+  {
     if (!m_ok)
       return 0;
 
@@ -68,14 +55,15 @@ public:
     }
   }
 
-  size_t readBytes(uint8_t* buf, size_t n) {
+  size_t readBytes(uint8_t* buf, size_t n) override
+  {
     if (!m_ok)
       return 0;
 
     if (m_pos < m_data.length) {
       n = std::min(n, m_data.length - m_pos);
 
-      memcpy(buf, ((const uint8_t*)m_data.bytes)+m_pos, n);
+      memcpy(buf, ((const uint8_t*)m_data.bytes) + m_pos, n);
       m_pos += n;
       return n;
     }
@@ -85,8 +73,15 @@ public:
     }
   }
 
-  void write8(uint8_t value) {
+  void write8(uint8_t value) override
+  {
     // Do nothing, we don't write in the file
+  }
+
+  size_t writeBytes(uint8_t* buf, size_t n) override
+  {
+    // Do nothing, we don't write in the file
+    return 0;
   }
 
   NSData* m_data;
@@ -96,9 +91,7 @@ public:
 
 } // anonymous namespace
 
-CGImageRef get_thumbnail(CFURLRef url,
-                         CFDictionaryRef options,
-                         CGSize maxSize)
+CGImageRef get_thumbnail(CFURLRef url, CGSize maxSize)
 {
   auto data = [[NSData alloc] initWithContentsOfURL:(NSURL*)url];
   if (!data)
@@ -126,18 +119,28 @@ CGImageRef get_thumbnail(CFURLRef url,
     else
       cx = wh;
 
-    image.reset(doc::Image::create(doc::IMAGE_RGB,
-                                   cx * w / wh,
-                                   cx * h / wh));
+    image.reset(doc::Image::create(doc::IMAGE_RGB, cx * w / wh, cx * h / wh));
     image->clear(0);
 
     render::Render render;
     render.setBgOptions(render::BgOptions::MakeTransparent());
-    render.setProjection(render::Projection(doc::PixelRatio(1, 1),
-                                            render::Zoom(cx, wh)));
-    render.renderSprite(image.get(), spr, 0,
-                        gfx::ClipF(0, 0, 0, 0,
-                                   image->width(), image->height()));
+    render.setProjection(render::Projection(doc::PixelRatio(1, 1), render::Zoom(cx, wh)));
+    render.renderSprite(image.get(),
+                        spr,
+                        0,
+                        gfx::ClipF(0, 0, 0, 0, image->width(), image->height()));
+
+    // Alpha premultiplication.
+    // CGBitmapContextCreate doesn't support unpremultiplied alpha images (kCGImageAlphaFirst).
+    doc::LockImageBits<doc::RgbTraits> bits(image.get());
+    doc::LockImageBits<doc::RgbTraits>::iterator it, end;
+    for (it = bits.begin(), end = bits.end(); it != end; ++it) {
+      const int a = doc::rgba_geta(*it);
+      *it = doc::rgba(doc::rgba_getr(*it) * a / 255,
+                      doc::rgba_getg(*it) * a / 255,
+                      doc::rgba_getb(*it) * a / 255,
+                      a);
+    }
 
     w = image->width();
     h = image->height();
@@ -147,14 +150,14 @@ CGImageRef get_thumbnail(CFURLRef url,
     return nullptr;
   }
 
-  // TODO Premultiply alpha because CGBitmapContextCreate doesn't
-  //      support unpremultiplied alpha (kCGImageAlphaFirst).
-
   CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB);
-  CGContextRef gc = CGBitmapContextCreate(
-    image->getPixelAddress(0, 0),
-    w, h, 8, image->rowBytes(), cs,
-    kCGImageAlphaPremultipliedLast);
+  CGContextRef gc = CGBitmapContextCreate(image->getPixelAddress(0, 0),
+                                          w,
+                                          h,
+                                          8,
+                                          image->rowBytes(),
+                                          cs,
+                                          kCGImageAlphaPremultipliedLast);
   CGColorSpaceRelease(cs);
 
   CGImageRef img = CGBitmapContextCreateImage(gc);
@@ -163,3 +166,42 @@ CGImageRef get_thumbnail(CFURLRef url,
 }
 
 } // namespace desktop
+
+@interface ThumbnailProvider : QLThumbnailProvider
+@end
+
+@implementation ThumbnailProvider
+
+- (void)provideThumbnailForFileRequest:(QLFileThumbnailRequest*)request
+                     completionHandler:
+                       (void (^)(QLThumbnailReply* _Nullable, NSError* _Nullable))handler
+{
+  CFURLRef url = (__bridge CFURLRef)(request.fileURL);
+  CGSize maxSize = request.maximumSize;
+  CGImageRef cgImage = desktop::get_thumbnail(url, maxSize);
+  if (!cgImage) {
+    handler(nil, nil);
+    return;
+  }
+  CGSize imageSize = CGSizeMake(CGImageGetWidth(cgImage), CGImageGetHeight(cgImage));
+  handler([QLThumbnailReply replyWithContextSize:maxSize
+                      currentContextDrawingBlock:^BOOL {
+                        CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
+                        CGContextSaveGState(ctx);
+                        CGFloat scale = MIN(maxSize.width / imageSize.width,
+                                            maxSize.height / imageSize.height);
+                        CGSize scaledSize = CGSizeMake(imageSize.width * scale,
+                                                       imageSize.height * scale);
+                        CGRect drawRect = CGRectMake((maxSize.width - scaledSize.width) / 2,
+                                                     (maxSize.height - scaledSize.height) / 2,
+                                                     scaledSize.width,
+                                                     scaledSize.height);
+                        CGContextDrawImage(ctx, drawRect, cgImage);
+                        CGContextRestoreGState(ctx);
+                        CGImageRelease(cgImage);
+                        return YES;
+                      }],
+          nil);
+}
+
+@end

@@ -1,12 +1,12 @@
 // Aseprite UI Library
-// Copyright (C) 2018-2022  Igara Studio S.A.
+// Copyright (C) 2018-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "ui/tooltips.h"
@@ -26,21 +26,19 @@
 
 #include <string>
 
-static const int kTooltipDelayMsecs = 300;
+static const int kDefaultTooltipDelayMsecs = 300;
 
 namespace ui {
 
 using namespace gfx;
 
-TooltipManager::TooltipManager()
-  : Widget(kGenericWidget)
+TooltipManager::TooltipManager() : m_delay(kDefaultTooltipDelayMsecs)
 {
   Manager* manager = Manager::getDefault();
   manager->addMessageFilter(kMouseEnterMessage, this);
   manager->addMessageFilter(kKeyDownMessage, this);
   manager->addMessageFilter(kMouseDownMessage, this);
   manager->addMessageFilter(kMouseLeaveMessage, this);
-
   setVisible(false);
 }
 
@@ -52,40 +50,62 @@ TooltipManager::~TooltipManager()
 
 void TooltipManager::addTooltipFor(Widget* widget, const std::string& text, int arrowAlign)
 {
-  ASSERT(!widget->hasFlags(IGNORE_MOUSE));
+  ASSERT(widget);
+
+  // This can happen if we add a tooltip to a label, we have to start listening mouse events.
+  if (widget->hasFlags(IGNORE_MOUSE))
+    widget->disableFlags(IGNORE_MOUSE);
 
   m_tips[widget] = TipInfo(text, arrowAlign);
 }
 
 void TooltipManager::removeTooltipFor(Widget* widget)
 {
-  auto it = m_tips.find(widget);
+  const auto it = m_tips.find(widget);
   if (it != m_tips.end())
     m_tips.erase(it);
+}
+
+void TooltipManager::setDelay(int delay)
+{
+  m_delay = delay;
+  if (m_timer)
+    m_timer->setInterval(m_delay);
+}
+
+std::string TooltipManager::getTooltipFor(Widget* widget)
+{
+  const auto it = m_tips.find(widget);
+  if (it != m_tips.end())
+    return m_tips[widget].text;
+
+  return {};
 }
 
 bool TooltipManager::onProcessMessage(Message* msg)
 {
   switch (msg->type()) {
-
     case kMouseEnterMessage: {
       // Tooltips are only for widgets that can directly get the mouse
       // (get the kMouseEnterMessage directly).
       if (Widget* widget = msg->recipient()) {
-        Tips::iterator it = m_tips.find(widget);
+        if (m_delay <= 0)
+          return false;
+
+        const auto it = m_tips.find(widget);
         if (it != m_tips.end()) {
           m_target.widget = it->first;
           m_target.tipInfo = it->second;
 
           if (m_timer == nullptr) {
-            m_timer.reset(new Timer(kTooltipDelayMsecs, this));
+            m_timer = std::make_unique<Timer>(m_delay, this);
             m_timer->Tick.connect(&TooltipManager::onTick, this);
           }
 
           m_timer->start();
         }
       }
-      break;
+      return false;
     }
 
     case kKeyDownMessage:
@@ -115,18 +135,16 @@ void TooltipManager::onInitTheme(InitThemeEvent& ev)
 void TooltipManager::onTick()
 {
   if (!m_tipWindow) {
-    m_tipWindow.reset(new TipWindow(m_target.tipInfo.text));
+    m_tipWindow = std::make_unique<TipWindow>(m_target.tipInfo.text);
 
     int arrowAlign = m_target.tipInfo.arrowAlign;
     gfx::Rect target = m_target.widget->bounds();
     if (!arrowAlign)
-      target.setOrigin(m_target.widget->mousePosInDisplay()+12*guiscale());
+      target.setOrigin(m_target.widget->mousePosInDisplay() + 12 * guiscale());
 
     ui::Display* targetDisplay = m_target.widget->display();
 
-    if (m_tipWindow->pointAt(arrowAlign,
-                             target,
-                             targetDisplay)) {
+    if (m_tipWindow->pointAt(arrowAlign, target, targetDisplay)) {
       m_tipWindow->openWindow();
       m_tipWindow->adjustTargetFrom(targetDisplay);
     }
@@ -166,9 +184,7 @@ void TipWindow::setCloseOnKeyDown(bool state)
   m_closeOnKeyDown = state;
 }
 
-bool TipWindow::pointAt(int arrowAlign,
-                        const gfx::Rect& target,
-                        const ui::Display* display)
+bool TipWindow::pointAt(int arrowAlign, const gfx::Rect& target, const ui::Display* display)
 {
   // TODO merge this code with the new ui::fit_bounds() algorithm
 
@@ -204,36 +220,36 @@ bool TipWindow::pointAt(int arrowAlign,
         y = m_target.y - h;
         break;
       case TOP:
-        x = m_target.x + m_target.w/2 - w/2;
+        x = m_target.x + m_target.w / 2 - w / 2;
         y = m_target.y + m_target.h;
         break;
       case BOTTOM:
-        x = m_target.x + m_target.w/2 - w/2;
+        x = m_target.x + m_target.w / 2 - w / 2;
         y = m_target.y - h;
         break;
       case LEFT:
         x = m_target.x + m_target.w;
-        y = m_target.y + m_target.h/2 - h/2;
+        y = m_target.y + m_target.h / 2 - h / 2;
         break;
       case RIGHT:
         x = m_target.x - w;
-        y = m_target.y + m_target.h/2 - h/2;
+        y = m_target.y + m_target.h / 2 - h / 2;
         break;
     }
 
     if (get_multiple_displays()) {
       const gfx::Rect waBounds = nativeParentWindow->screen()->workarea();
       gfx::Point pt = nativeParentWindow->pointToScreen(gfx::Point(x, y));
-      pt.x = std::clamp(pt.x, waBounds.x, waBounds.x2()-w);
-      pt.y = std::clamp(pt.y, waBounds.y, waBounds.y2()-h);
+      pt.x = std::clamp(pt.x, waBounds.x, std::max(waBounds.x, waBounds.x2() - w));
+      pt.y = std::clamp(pt.y, waBounds.y, std::max(waBounds.y, waBounds.y2() - h));
       pt = nativeParentWindow->pointFromScreen(pt);
       x = pt.x;
       y = pt.y;
     }
     else {
       const gfx::Rect displayBounds = display->bounds();
-      x = std::clamp(x, displayBounds.x, displayBounds.x2()-w);
-      y = std::clamp(y, displayBounds.y, displayBounds.y2()-h);
+      x = std::clamp(x, displayBounds.x, std::max(displayBounds.x, displayBounds.x2() - w));
+      y = std::clamp(y, displayBounds.y, std::max(displayBounds.y, displayBounds.y2() - h));
     }
 
     if (m_target.intersects(gfx::Rect(x, y, w, h))) {
@@ -241,13 +257,17 @@ bool TipWindow::pointAt(int arrowAlign,
         case 0:
         case 2:
           // Switch position
-          if (arrowAlign & (TOP | BOTTOM)) arrowAlign ^= TOP | BOTTOM;
-          if (arrowAlign & (LEFT | RIGHT)) arrowAlign ^= LEFT | RIGHT;
+          if (arrowAlign & (TOP | BOTTOM))
+            arrowAlign ^= TOP | BOTTOM;
+          if (arrowAlign & (LEFT | RIGHT))
+            arrowAlign ^= LEFT | RIGHT;
           break;
         case 1:
           // Rotate positions
-          if (arrowAlign & (TOP | LEFT)) arrowAlign ^= TOP | LEFT;
-          if (arrowAlign & (BOTTOM | RIGHT)) arrowAlign ^= BOTTOM | RIGHT;
+          if (arrowAlign & (TOP | LEFT))
+            arrowAlign ^= TOP | LEFT;
+          if (arrowAlign & (BOTTOM | RIGHT))
+            arrowAlign ^= BOTTOM | RIGHT;
           break;
       }
     }
@@ -278,13 +298,10 @@ void TipWindow::adjustTargetFrom(const ui::Display* targetDisplay)
 bool TipWindow::onProcessMessage(Message* msg)
 {
   switch (msg->type()) {
-
     case kKeyDownMessage:
-      if (m_closeOnKeyDown &&
-          static_cast<KeyMessage*>(msg)->scancode() < kKeyFirstModifierScancode)
+      if (m_closeOnKeyDown && static_cast<KeyMessage*>(msg)->scancode() < kKeyFirstModifierScancode)
         closeWindow(nullptr);
       break;
-
   }
 
   return PopupWindow::onProcessMessage(msg);
@@ -292,10 +309,13 @@ bool TipWindow::onProcessMessage(Message* msg)
 
 void TipWindow::onPaint(PaintEvent& ev)
 {
-  theme()->paintTooltip(
-    ev.graphics(), this, style(), arrowStyle(),
-    clientBounds(), arrowAlign(),
-    target());
+  theme()->paintTooltip(ev.graphics(),
+                        this,
+                        style(),
+                        arrowStyle(),
+                        clientBounds(),
+                        arrowAlign(),
+                        target());
 }
 
 void TipWindow::onBuildTitleLabel()

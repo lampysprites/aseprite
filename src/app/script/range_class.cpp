@@ -1,11 +1,11 @@
 // Aseprite
-// Copyright (C) 2018-2022  Igara Studio S.A.
+// Copyright (C) 2018-2023  Igara Studio S.A.
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -16,7 +16,6 @@
 #include "app/script/luacpp.h"
 #include "app/site.h"
 #include "app/ui/editor/editor.h"
-#include "app/util/range_utils.h"
 #include "doc/cel.h"
 #include "doc/layer.h"
 #include "doc/object_ids.h"
@@ -24,12 +23,12 @@
 #include "doc/slices.h"
 #include "doc/sprite.h"
 #include "doc/tile.h"
+#include "view/cels.h"
 
 #include <set>
 #include <vector>
 
-namespace app {
-namespace script {
+namespace app { namespace script {
 
 namespace {
 
@@ -43,13 +42,12 @@ struct RangeObj { // This is like DocRange but referencing objects with IDs
   std::vector<color_t> colors;
   std::vector<tile_index> tiles;
 
-  RangeObj(Site& site) {
-    updateFromSite(site);
-  }
+  RangeObj(Site& site) { updateFromSite(site); }
   RangeObj(const RangeObj&) = delete;
   RangeObj& operator=(const RangeObj&) = delete;
 
-  void updateFromSite(const Site& site) {
+  void updateFromSite(const Site& site)
+  {
     if (!site.sprite()) {
       type = DocRange::kNone;
       spriteId = NullId;
@@ -77,14 +75,16 @@ struct RangeObj { // This is like DocRange but referencing objects with IDs
       // it might not be possible because we have to save the IDs of the
       // objects (and we cannot store the DocRange because it contains
       // pointers instead of IDs).
-      for (const Cel* cel : get_cels(site.sprite(), range))
+      for (const Cel* cel : view::get_cels(site.sprite(), range))
         cels.insert(cel->id());
     }
     else {
       // Put the active frame/layer/cel information in the range
       frames.push_back(site.frame());
-      if (site.layer()) layers.insert(site.layer()->id());
-      if (site.cel()) cels.insert(site.cel()->id());
+      if (site.layer())
+        layers.insert(site.layer()->id());
+      if (site.cel())
+        cels.insert(site.cel()->id());
     }
 
     if (site.selectedColors().picks() > 0)
@@ -98,22 +98,19 @@ struct RangeObj { // This is like DocRange but referencing objects with IDs
 
   Sprite* sprite(lua_State* L) { return check_docobj(L, doc::get<Sprite>(spriteId)); }
 
-  bool contains(const Layer* layer) const {
-    return layers.contains(layer->id());
-  }
-  bool contains(const frame_t frame) const {
+  bool contains(const Layer* layer) const { return layers.contains(layer->id()); }
+  bool contains(const frame_t frame) const
+  {
     return std::find(frames.begin(), frames.end(), frame) != frames.end();
   }
-  bool contains(const Cel* cel) const {
-    return cels.contains(cel->id());
-  }
-  bool contains(const Slice* slice) const {
-    return slices.contains(slice->id());
-  }
-  bool containsColor(const color_t color) const {
+  bool contains(const Cel* cel) const { return cels.contains(cel->id()); }
+  bool contains(const Slice* slice) const { return slices.contains(slice->id()); }
+  bool containsColor(const color_t color) const
+  {
     return (std::find(colors.begin(), colors.end(), color) != colors.end());
   }
-  bool containsTile(const tile_t tile) const {
+  bool containsTile(const tile_t tile) const
+  {
     return (std::find(tiles.begin(), tiles.end(), tile) != tiles.end());
   }
 };
@@ -188,12 +185,10 @@ int Range_clear(lua_State* L)
   doc::PalettePicks picks;
   ctx->setSelectedColors(picks);
 
-#ifdef ENABLE_UI
   // Empty selected slices in the current editor
   // TODO add a new function to Context class for this
   if (auto editor = Editor::activeEditor())
     editor->clearSlicesSelection();
-#endif
 
   obj->updateFromSite(ctx->activeSite());
   return 0;
@@ -360,7 +355,7 @@ int Range_set_colors(lua_State* L)
     while (lua_next(L, 2) != 0) {
       int i = lua_tointeger(L, -1);
       if (i >= picks.size())
-        picks.resize(i+1);
+        picks.resize(i + 1);
       picks[i] = true;
       lua_pop(L, 1);
     }
@@ -381,7 +376,7 @@ int Range_set_tiles(lua_State* L)
     while (lua_next(L, 2) != 0) {
       int i = lua_tointeger(L, -1);
       if (i >= picks.size())
-        picks.resize(i+1);
+        picks.resize(i + 1);
       picks[i] = true;
       lua_pop(L, 1);
     }
@@ -397,7 +392,6 @@ int Range_set_slices(lua_State* L)
   app::Context* ctx = App::instance()->context();
 
   // TODO we should add support to CLI scripts
-#ifdef ENABLE_UI
   if (auto editor = Editor::activeEditor()) {
     editor->clearSlicesSelection();
     const int len = luaL_len(L, 2);
@@ -407,34 +401,33 @@ int Range_set_slices(lua_State* L)
       lua_pop(L, 1);
     }
   }
-#endif
 
   obj->updateFromSite(ctx->activeSite());
   return 0;
 }
 
 const luaL_Reg Range_methods[] = {
-  { "__gc", Range_gc },
-  { "contains", Range_contains },
+  { "__gc",          Range_gc            },
+  { "contains",      Range_contains      },
   { "containsColor", Range_containsColor },
-  { "containsTile", Range_containsTile },
-  { "clear", Range_clear },
-  { nullptr, nullptr }
+  { "containsTile",  Range_containsTile  },
+  { "clear",         Range_clear         },
+  { nullptr,         nullptr             }
 };
 
 const Property Range_properties[] = {
-  { "sprite", Range_get_sprite, nullptr },
-  { "type", Range_get_type, nullptr },
-  { "isEmpty", Range_get_isEmpty, nullptr },
-  { "layers", Range_get_layers, Range_set_layers },
-  { "frames", Range_get_frames, Range_set_frames },
-  { "cels", Range_get_cels, nullptr },
-  { "images", Range_get_images, nullptr },
-  { "editableImages", Range_get_editableImages, nullptr },
-  { "colors", Range_get_colors, Range_set_colors },
-  { "tiles", Range_get_tiles, Range_set_tiles },
-  { "slices", Range_get_slices, Range_set_slices },
-  { nullptr, nullptr, nullptr }
+  { "sprite",         Range_get_sprite,         nullptr          },
+  { "type",           Range_get_type,           nullptr          },
+  { "isEmpty",        Range_get_isEmpty,        nullptr          },
+  { "layers",         Range_get_layers,         Range_set_layers },
+  { "frames",         Range_get_frames,         Range_set_frames },
+  { "cels",           Range_get_cels,           nullptr          },
+  { "images",         Range_get_images,         nullptr          },
+  { "editableImages", Range_get_editableImages, nullptr          },
+  { "colors",         Range_get_colors,         Range_set_colors },
+  { "tiles",          Range_get_tiles,          Range_set_tiles  },
+  { "slices",         Range_get_slices,         Range_set_slices },
+  { nullptr,          nullptr,                  nullptr          }
 };
 
 } // anonymous namespace
@@ -453,5 +446,4 @@ void push_doc_range(lua_State* L, Site& site)
   push_new<RangeObj>(L, site);
 }
 
-} // namespace script
-} // namespace app
+}} // namespace app::script

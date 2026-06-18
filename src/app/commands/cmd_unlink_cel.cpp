@@ -1,11 +1,12 @@
 // Aseprite
+// Copyright (C) 2023  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -18,7 +19,6 @@
 #include "app/ui/status_bar.h"
 #include "doc/cel.h"
 #include "doc/layer.h"
-#include "doc/sprite.h"
 
 namespace app {
 
@@ -31,8 +31,7 @@ protected:
   void onExecute(Context* context) override;
 };
 
-UnlinkCelCommand::UnlinkCelCommand()
-  : Command(CommandId::UnlinkCel(), CmdRecordableFlag)
+UnlinkCelCommand::UnlinkCelCommand() : Command(CommandId::UnlinkCel())
 {
 }
 
@@ -49,10 +48,9 @@ void UnlinkCelCommand::onExecute(Context* context)
   {
     Tx tx(writer, "Unlink Cel");
 
-    const Site* site = writer.site();
-    if (site->inTimeline() &&
-        !site->selectedLayers().empty()) {
-      for (Layer* layer : site->selectedLayers()) {
+    const Site& site = writer.site();
+    if (site.inTimeline() && !site.selectedLayers().empty()) {
+      for (Layer* layer : site.selectedLayers()) {
         if (!layer->isImage())
           continue;
 
@@ -63,7 +61,7 @@ void UnlinkCelCommand::onExecute(Context* context)
 
         LayerImage* layerImage = static_cast<LayerImage*>(layer);
 
-        for (frame_t frame : site->selectedFrames().reversed()) {
+        for (frame_t frame : site.selectedFrames().reversed()) {
           Cel* cel = layerImage->cel(frame);
           if (cel && cel->links())
             tx(new cmd::UnlinkCel(cel));
@@ -84,8 +82,7 @@ void UnlinkCelCommand::onExecute(Context* context)
   }
 
   if (nonEditableLayers)
-    StatusBar::instance()->showTip(1000,
-      Strings::statusbar_tips_locked_layers());
+    StatusBar::instance()->showTip(1000, Strings::statusbar_tips_locked_layers());
 
   update_screen_for_document(document);
 }

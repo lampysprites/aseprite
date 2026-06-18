@@ -5,7 +5,7 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/commands/quick_command.h"
@@ -13,7 +13,7 @@
 namespace app {
 
 QuickCommand::QuickCommand(const char* id, std::function<void()> execute)
-  : Command(id, CmdUIOnlyFlag)
+  : Command(id)
   , m_execute(execute)
 {
 }

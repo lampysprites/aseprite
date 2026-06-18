@@ -15,8 +15,8 @@ enum class FileFormat {
   ERROR = -1,
   UNKNOWN = 0,
 
-  ASE_ANIMATION,                // Aseprite File Format
-  ASE_PALETTE,                  // Adobe Swatch Exchange
+  ASE_ANIMATION, // Aseprite File Format
+  ASE_PALETTE,   // Adobe Swatch Exchange
   ACT_PALETTE,
   BMP_IMAGE,
   COL_PALETTE,
@@ -35,7 +35,16 @@ enum class FileFormat {
   CSS_STYLE,
   PSD_IMAGE,
   QOI_IMAGE,
+
+  FIRST_CUSTOM = 1000,
+  LAST_CUSTOM = 9999
 };
+
+inline FileFormat register_custom_format()
+{
+  static int type = static_cast<int>(FileFormat::FIRST_CUSTOM);
+  return static_cast<FileFormat>(type++);
+}
 
 } // namespace dio
 

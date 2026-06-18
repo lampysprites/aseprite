@@ -1,0 +1,13 @@
+name: pre-commit
+on: [pull_request]
+jobs:
+  precommit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: j178/prek-action@v1
+      with:
+        extra_args: "--from-ref ${{ github.event.pull_request.base.sha }} --to-ref ${{ github.event.pull_request.head.sha }}"

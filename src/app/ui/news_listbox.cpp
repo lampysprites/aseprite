@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2020-2024  Igara Studio S.A.
+// Copyright (C) 2020-2025  Igara Studio S.A.
 // Copyright (C) 2001-2017  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/ui/news_listbox.h"
@@ -20,6 +20,7 @@
 #include "base/fs.h"
 #include "base/string.h"
 #include "base/time.h"
+#include "text/font_metrics.h"
 #include "ui/link_label.h"
 #include "ui/message.h"
 #include "ui/paint_event.h"
@@ -45,20 +46,25 @@ std::string convert_html_entity(const std::string& e)
   if (e.size() >= 3 && e[0] == '#' && std::isdigit(e[1])) {
     long unicodeChar;
     if (e[2] == 'x')
-      unicodeChar = std::strtol(e.c_str()+1, nullptr, 16);
+      unicodeChar = std::strtol(e.c_str() + 1, nullptr, 16);
     else
-      unicodeChar = std::strtol(e.c_str()+1, nullptr, 10);
+      unicodeChar = std::strtol(e.c_str() + 1, nullptr, 10);
 
-    if (unicodeChar == 0x2018) return "\x60";
-    if (unicodeChar == 0x2019) return "'";
+    if (unicodeChar == 0x2018)
+      return "\x60";
+    if (unicodeChar == 0x2019)
+      return "'";
     else {
       std::wstring wstr(1, (wchar_t)unicodeChar);
       return base::to_utf8(wstr);
     }
   }
-  else if (e == "lt") return "<";
-  else if (e == "gt") return ">";
-  else if (e == "amp") return "&";
+  else if (e == "lt")
+    return "<";
+  else if (e == "gt")
+    return ">";
+  else if (e == "amp")
+    return "&";
   return "";
 }
 
@@ -79,15 +85,15 @@ std::string parse_html(const std::string& str)
 
         std::string tag = str.substr(j, i - j);
         if (tag == "li") {
-          if (!paraOpen)
+          if (!paraOpen && result.back() != '\n')
             result.push_back('\n');
           result.push_back((char)0xc2);
           result.push_back((char)0xb7); // middle dot
           result.push_back(' ');
           paraOpen = false;
         }
-        else if (tag == "p" || tag == "ul") {
-          if (!paraOpen)
+        else if (tag == "p" || tag == "ul" || tag[0] == 'h') {
+          if (!paraOpen && result.back() != '\n')
             result.push_back('\n');
           paraOpen = true;
         }
@@ -114,88 +120,103 @@ std::string parse_html(const std::string& str)
     // like "What's new? ..." or "We're ..." and to avoid
     // anti-aliasing (using a TTF font) as the Aseprite font doesn't
     // contain this character yet.
-    else if (i+2 < str.size() &&
-             ((unsigned char)str[i  ]) == 0xe2 &&
-             ((unsigned char)str[i+1]) == 0x80 &&
-             ((unsigned char)str[i+2]) == 0x99) {
+    else if (i + 2 < str.size() && ((unsigned char)str[i]) == 0xe2 &&
+             ((unsigned char)str[i + 1]) == 0x80 && ((unsigned char)str[i + 2]) == 0x99) {
       result.push_back('\'');
       i += 3;
       paraOpen = false;
     }
     else {
-      result.push_back(str[i++]);
+      auto character = str[i++];
+      if (character == '\n') {
+        // Rely only on paragraphs for newlines, otherwise we render them as just spaces because
+        // sometimes they show up in the middle of sentences.
+        result.push_back(' ');
+      }
+      else {
+        result.push_back(character);
+      }
       paraOpen = false;
     }
   }
   return result;
 }
 
-}
+} // namespace
 
 class NewsItem : public LinkLabel {
 public:
-  NewsItem(const std::string& link,
-           const std::string& title,
-           const std::string& desc)
+  NewsItem(const std::string& link, const std::string& title, const std::string& desc)
     : LinkLabel(link, title)
     , m_title(title)
-    , m_desc(desc) {
+    , m_desc(desc)
+  {
   }
 
 protected:
-  void onSizeHint(SizeHintEvent& ev) override {
+  void onSizeHint(SizeHintEvent& ev) override
+  {
     auto theme = SkinTheme::get(this);
     ui::Style* style = theme->styles.newsItem();
 
-    setTextQuiet(m_title);
     gfx::Size sz = theme->calcSizeHint(this, style);
 
-    if (!m_desc.empty())
-      sz.h *= 5;
+    if (!m_desc.empty()) {
+      // Title + number of total lines
+      sz.h *= 1 + std::count(m_desc.begin(), m_desc.end(), '\n');
+    }
 
     ev.setSizeHint(gfx::Size(0, sz.h));
   }
 
-  void onPaint(PaintEvent& ev) override {
+  void onPaint(PaintEvent& ev) override
+  {
     auto theme = SkinTheme::get(this);
     Graphics* g = ev.graphics();
     gfx::Rect bounds = clientBounds();
     ui::Style* style = theme->styles.newsItem();
     ui::Style* styleDetail = theme->styles.newsItemDetail();
 
-    setTextQuiet(m_title);
     gfx::Size textSize = theme->calcSizeHint(this, style);
     gfx::Rect textBounds(bounds.x, bounds.y, bounds.w, textSize.h);
-    gfx::Rect detailsBounds(
-      bounds.x, bounds.y+textSize.h,
-      bounds.w, bounds.h-textSize.h);
+    gfx::Rect detailsBounds(bounds.x, bounds.y + textSize.h, bounds.w, bounds.h - textSize.h);
 
-    theme->paintWidget(g, this, style, textBounds);
+    gfx::Border border = theme->calcBorder(this, style);
+    gfx::Border borderDetail = theme->calcBorder(this, styleDetail);
 
-    setTextQuiet(m_desc);
-    theme->paintWidget(g, this, styleDetail, detailsBounds);
+    if (!m_titleBlob)
+      m_titleBlob = text::TextBlob::MakeWithShaper(theme->fontMgr(), font(), m_title);
+
+    PaintWidgetPartInfo info(this);
+    info.baseline = border.top();
+    if (m_titleBlob) {
+      info.textBlob = m_titleBlob;
+      info.baseline += m_titleBlob->baseline();
+      theme->paintWidgetPart(g, style, bounds, info);
+      info.baseline += border.bottom();
+
+      info.text = &m_desc;
+      info.textBlob = nullptr;
+      info.baseline += borderDetail.top() + m_titleBlob->baseline();
+      theme->paintWidgetPart(g, styleDetail, detailsBounds, info);
+    }
   }
 
 private:
   std::string m_title;
   std::string m_desc;
+  text::TextBlobRef m_titleBlob;
 };
 
 class ProblemsItem : public NewsItem {
 public:
-  ProblemsItem()
-    : NewsItem("", Strings::news_listbox_problem_loading(), "") {
-  }
+  ProblemsItem() : NewsItem("", Strings::news_listbox_problem_loading(), "") {}
 
 protected:
-  void onClick() override {
-    static_cast<NewsListBox*>(parent())->reload();
-  }
+  void onClick() override { static_cast<NewsListBox*>(parent())->reload(); }
 };
 
-NewsListBox::NewsListBox()
-  : m_timer(250, this)
-  , m_loader(nullptr)
+NewsListBox::NewsListBox() : m_timer(250, this), m_loader(nullptr)
 {
   m_timer.Tick.connect(&NewsListBox::onTick, this);
 
@@ -234,7 +255,6 @@ void NewsListBox::reload()
 bool NewsListBox::onProcessMessage(ui::Message* msg)
 {
   switch (msg->type()) {
-
     case kCloseMessage:
       if (m_loader)
         m_loader->abort();
@@ -280,10 +300,10 @@ void NewsListBox::parseFile(const std::string& filename)
   }
 
   XMLHandle handle(doc.get());
-  XMLElement* itemXml = handle
-    .FirstChildElement("rss")
-    .FirstChildElement("channel")
-    .FirstChildElement("item").ToElement();
+  XMLElement* itemXml = handle.FirstChildElement("rss")
+                          .FirstChildElement("channel")
+                          .FirstChildElement("item")
+                          .ToElement();
 
   int count = 0;
 
@@ -291,9 +311,8 @@ void NewsListBox::parseFile(const std::string& filename)
     XMLElement* titleXml = itemXml->FirstChildElement("title");
     XMLElement* descXml = itemXml->FirstChildElement("description");
     XMLElement* linkXml = itemXml->FirstChildElement("link");
-    if (titleXml && titleXml->GetText() &&
-        descXml && descXml->GetText() &&
-        linkXml && linkXml->GetText()) {
+    if (titleXml && titleXml->GetText() && descXml && descXml->GetText() && linkXml &&
+        linkXml->GetText()) {
       std::string link = linkXml->GetText();
       std::string title = titleXml->GetText();
       std::string desc = parse_html(descXml->GetText());
@@ -317,13 +336,12 @@ void NewsListBox::parseFile(const std::string& filename)
     itemXml = itemXml->NextSiblingElement();
   }
 
-  XMLElement* linkXml = handle
-    .FirstChildElement("rss")
-    .FirstChildElement("channel")
-    .FirstChildElement("link").ToElement();
+  XMLElement* linkXml = handle.FirstChildElement("rss")
+                          .FirstChildElement("channel")
+                          .FirstChildElement("link")
+                          .ToElement();
   if (linkXml && linkXml->GetText())
-    addChild(
-      new NewsItem(linkXml->GetText(), Strings::news_listbox_more(), ""));
+    addChild(new NewsItem(linkXml->GetText(), Strings::news_listbox_more(), ""));
 
   if (view)
     view->updateView();
@@ -334,9 +352,7 @@ void NewsListBox::parseFile(const std::string& filename)
 
 bool NewsListBox::validCache(const std::string& filename)
 {
-  base::Time
-    now = base::current_time(),
-    time = base::get_modification_time(filename);
+  base::Time now = base::current_time(), time = base::get_modification_time(filename);
 
   now.dateOnly();
   time.dateOnly();

@@ -1,11 +1,11 @@
 // Aseprite
-// Copyright (C) 2019-2023  Igara Studio S.A.
+// Copyright (C) 2019-2024  Igara Studio S.A.
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/file/file_op_config.h"
@@ -25,7 +25,9 @@ void FileOpConfig::fillFromPreferences()
   defaultSliceColor = pref.slices.defaultColor();
   workingCS = get_working_rgb_space_from_preferences();
   rgbMapAlgorithm = pref.quantization.rgbmapAlgorithm();
+  fitCriteria = pref.quantization.fitCriteria();
   cacheCompressedTilesets = pref.tileset.cacheCompressedTilesets();
+  composeGroups = pref.experimental.composeGroups();
 }
 
 } // namespace app

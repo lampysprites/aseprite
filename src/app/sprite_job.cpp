@@ -6,7 +6,7 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/sprite_job.h"
@@ -15,9 +15,8 @@
 
 namespace app {
 
-SpriteJob::SpriteJob(Context* ctx, Doc* doc,
-                     const std::string& jobName)
-  : Job(jobName)
+SpriteJob::SpriteJob(Context* ctx, Doc* doc, const std::string& jobName, const bool showProgress)
+  : Job(jobName, showProgress)
   , m_doc(doc)
   , m_sprite(doc->sprite())
   , m_tx(Tx::DontLockDoc, ctx, doc, jobName, ModifyDocument)

@@ -41,10 +41,11 @@ because they don't depend on any other component.
   * [dio](dio/) (base, doc, fixmath, flic): Load/save sprites/documents.
   * [filters](filters/) (base, doc, gfx): Effects for images.
   * [render](render/) (base, doc, gfx): Library to render documents.
+  * [view](view/) (base, doc): Abstract timeline/range view/helpers.
 
 ## Level 4
 
-  * [app](app/) (base, doc, dio, filters, fixmath, flic, gfx, pen, render, scripting, os, ui, undo, updater)
+  * [app](app/) (base, doc, dio, filters, fixmath, flic, gfx, pen, render, scripting, os, ui, undo, updater, view)
   * [desktop](desktop/) (base, doc, dio, render): Integration with the desktop (Windows Explorer, Finder, GNOME, KDE, etc.)
 
 ## Level 5
@@ -70,6 +71,37 @@ In Debug mode (`_DEBUG`):
 
 * [`TRACEARGS`](https://github.com/aseprite/laf/blob/f3222bdee2d21556e9da55343e73803c730ecd97/base/debug.h#L40):
   in debug mode, it prints in the terminal/console each given argument
+
+In release mode you can use a similar function:
+
+* `PRINTARGS` prints in the terminal/console each given argument
+
+# Trace Macros
+
+You can uncomment/enable some special macros to debug specific
+features when you are trying to fix a part of the program:
+
+* `src/ui/manager.cpp`:
+  * `REPORT_MESSAGES`: Prints a string each time a message is removed
+    from the queue, and is sent to a widget. You can enable specific
+    flags to debug mouse/paint/timer messages:
+    * `REPORT_MOUSE_MESSAGES`
+    * `REPORT_PAINT_MESSAGES`
+    * `REPORT_TIMER_MESSAGES`
+  * `REPORT_FOCUS_MOVEMENT`: Prints the list of widgets that
+    participate in the focus movement.
+  * `LIMIT_DISPATCH_TIME`: Limit the amount of time we can pump UI
+    messages until we ask for new events to the OS.
+  * `GARBAGE_TRACE`: Prints debug messages to keep track when a
+    deferDelete() is finally executed.
+  * `CAPTURE_TRACE`: Prints debug messages when the mouse is
+    captured/released.
+* `src/ui/message.h`:
+  * `DEBUG_PAINT_MESSAGES`: Prints a blue rectangle on the screen
+    before sending the final `kPaintMessage`.
+* `src/ui/widget.cpp`:
+  * `PAINT_BASELINE`: Paints a dotted line where the baseline is
+    located for every single widget.
 
 # Detect Platform
 

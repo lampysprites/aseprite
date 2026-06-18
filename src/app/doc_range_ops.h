@@ -1,4 +1,5 @@
 // Aseprite
+// Copyright (C) 2023 Igara Studio S.A.
 // Copyright (C) 2001-2018 David Capello
 //
 // This program is distributed under the terms of
@@ -8,35 +9,35 @@
 #define APP_DOC_RANGE_OPS_H_INCLUDED
 #pragma once
 
+#include "app/doc_range.h"
 #include "app/tags_handling.h"
 
 #include <vector>
 
 namespace app {
-  class Doc;
-  class DocRange;
+class Doc;
 
-  enum DocRangePlace {
-    kDocRangeBefore,
-    kDocRangeAfter,
-    kDocRangeFirstChild,
-  };
+enum DocRangePlace {
+  kDocRangeBefore,
+  kDocRangeAfter,
+  kDocRangeFirstChild,
+};
 
-  // These functions returns the new location of the "from" range or
-  // throws an std::runtime_error() in case that the operation cannot
-  // be done. (E.g. the background layer cannot be moved.)
-  DocRange move_range(Doc* doc,
-                      const DocRange& from,
-                      const DocRange& to,
-                      const DocRangePlace place,
-                      const TagsHandling tagsHandling = kDefaultTagsAdjustment);
-  DocRange copy_range(Doc* doc,
-                      const DocRange& from,
-                      const DocRange& to,
-                      const DocRangePlace place,
-                      const TagsHandling tagsHandling = kDefaultTagsAdjustment);
+// These functions returns the new location of the "from" range or
+// throws an std::runtime_error() in case that the operation cannot
+// be done. (E.g. the background layer cannot be moved.)
+DocRange move_range(Doc* doc,
+                    const DocRange& from,
+                    const DocRange& to,
+                    const DocRangePlace place,
+                    const TagsHandling tagsHandling = kDefaultTagsAdjustment);
+DocRange copy_range(Doc* doc,
+                    const DocRange& from,
+                    const DocRange& to,
+                    const DocRangePlace place,
+                    const TagsHandling tagsHandling = kDefaultTagsAdjustment);
 
-  void reverse_frames(Doc* doc, const DocRange& range);
+void reverse_frames(Doc* doc, const DocRange& range);
 
 } // namespace app
 

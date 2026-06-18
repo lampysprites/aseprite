@@ -1,5 +1,5 @@
 // Aseprite
-// Copyright (C) 2019-2022  Igara Studio S.A.
+// Copyright (C) 2019-present  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
@@ -12,13 +12,14 @@
  */
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/file_system.h"
 
 #include "base/fs.h"
 #include "base/string.h"
+#include "dio/detect_format.h"
 #include "os/surface.h"
 #include "os/system.h"
 #include "os/window.h"
@@ -37,7 +38,7 @@
   #include <shlobj.h>
   #include <shlwapi.h>
 
-  #define MYPC_CSLID  "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"
+  #define MYPC_CSLID "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"
 #else
   #include <dirent.h>
   #include <sys/stat.h>
@@ -49,9 +50,9 @@
   #define MAX_PATH 4096
 #endif
 
-#define NOTINITIALIZED  "{*empty*}"
+#define NOTINITIALIZED "{*empty*}"
 
-#define FS_TRACE(...)           // TRACE
+#define FS_TRACE(...)  // TRACE
 
 namespace app {
 
@@ -66,8 +67,8 @@ FileItemMap* fileitems_map = nullptr;
 unsigned int current_file_system_version = 0;
 
 #ifdef _WIN32
-  base::ComPtr<IMalloc> shl_imalloc;
-  base::ComPtr<IShellFolder> shl_idesktop;
+base::ComPtr<IMalloc> shl_imalloc;
+base::ComPtr<IShellFolder> shl_idesktop;
 #endif
 
 // a position in the file-system
@@ -82,13 +83,16 @@ public:
   unsigned int m_version;
   bool m_removed;
   mutable bool m_is_folder;
+#ifdef _WIN32
+  bool m_isHidden = false;
+#endif
   std::atomic<double> m_thumbnailProgress;
   std::atomic<os::Surface*> m_thumbnail;
 #ifdef _WIN32
-  LPITEMIDLIST m_pidl;            // relative to parent
-  LPITEMIDLIST m_fullpidl;        // relative to the Desktop folder
-                                  // (like a full path-name, because the
-                                  // desktop is the root on Windows)
+  LPITEMIDLIST m_pidl;     // relative to parent
+  LPITEMIDLIST m_fullpidl; // relative to the Desktop folder
+                           // (like a full path-name, because the
+                           // desktop is the root on Windows)
 #endif
 
   FileItem(FileItem* parent);
@@ -119,22 +123,24 @@ public:
   bool hasExtension(const base::paths& extensions) override;
 
   double getThumbnailProgress() override { return m_thumbnailProgress; }
-  void setThumbnailProgress(double progress) override {
-    m_thumbnailProgress = progress;
-  }
+  void setThumbnailProgress(double progress) override { m_thumbnailProgress = progress; }
 
-  bool needThumbnail() const override {
-    return
-      !isBrowsable() &&
-      m_thumbnail == nullptr &&
-      m_thumbnailProgress < 1.0;
+  bool needThumbnail() const override
+  {
+    bool need = !isBrowsable() && m_thumbnail == nullptr && m_thumbnailProgress < 1.0;
+    if (need && dio::detect_format_by_file_extension(m_filename) >= dio::FileFormat::FIRST_CUSTOM) {
+      // No thumbnails for custom formats
+      return false;
+    }
+    return need;
   }
 
   os::SurfaceRef getThumbnail() override;
   void setThumbnail(const os::SurfaceRef& thumbnail) override;
 
   // Calls "delete this"
-  void deleteItem() {
+  void deleteItem()
+  {
     FileSystemModule::instance()->ItemRemoved(this);
 
     if (m_parent) {
@@ -163,24 +169,24 @@ public:
 
 // A more easy PIDLs interface (without using the SH* & IL* routines of W2K)
 #ifdef _WIN32
-  static SFGAOF get_pidl_attrib(FileItem* fileitem, SFGAOF attrib);
-  static void update_by_pidl(FileItem* fileitem, SFGAOF attrib);
-  static LPITEMIDLIST concat_pidl(LPITEMIDLIST pidlHead, LPITEMIDLIST pidlTail);
-  static UINT get_pidl_size(LPITEMIDLIST pidl);
-  static LPITEMIDLIST get_next_pidl(LPITEMIDLIST pidl);
-  static LPITEMIDLIST get_last_pidl(LPITEMIDLIST pidl);
-  static LPITEMIDLIST clone_pidl(LPITEMIDLIST pidl);
-  static LPITEMIDLIST remove_last_pidl(LPITEMIDLIST pidl);
-  static void free_pidl(LPITEMIDLIST pidl);
-  static std::string get_key_for_pidl(LPITEMIDLIST pidl);
+static SFGAOF get_pidl_attrib(FileItem* fileitem, SFGAOF attrib);
+static void update_by_pidl(FileItem* fileitem, SFGAOF attrib);
+static LPITEMIDLIST concat_pidl(LPITEMIDLIST pidlHead, LPITEMIDLIST pidlTail);
+static UINT get_pidl_size(LPITEMIDLIST pidl);
+static LPITEMIDLIST get_next_pidl(LPITEMIDLIST pidl);
+static LPITEMIDLIST get_last_pidl(LPITEMIDLIST pidl);
+static LPITEMIDLIST clone_pidl(LPITEMIDLIST pidl);
+static LPITEMIDLIST remove_last_pidl(LPITEMIDLIST pidl);
+static void free_pidl(LPITEMIDLIST pidl);
+static std::string get_key_for_pidl(LPITEMIDLIST pidl);
 
-  static FileItem* get_fileitem_by_fullpidl(LPITEMIDLIST pidl, bool create_if_not);
-  static void put_fileitem(FileItem* fileitem);
+static FileItem* get_fileitem_by_fullpidl(LPITEMIDLIST pidl, bool create_if_not);
+static void put_fileitem(FileItem* fileitem);
 #else
-  static FileItem* get_fileitem_by_path(const std::string& path, bool create_if_not);
-  static std::string remove_backslash_if_needed(const std::string& filename);
-  static std::string get_key_for_filename(const std::string& filename);
-  static void put_fileitem(FileItem* fileitem);
+static FileItem* get_fileitem_by_path(const std::string& path, bool create_if_not);
+static std::string remove_backslash_if_needed(const std::string& filename);
+static std::string get_key_for_filename(const std::string& filename);
+static void put_fileitem(FileItem* fileitem);
 #endif
 
 FileSystemModule* FileSystemModule::m_instance = nullptr;
@@ -196,12 +202,14 @@ FileSystemModule::FileSystemModule()
   /* get the IMalloc interface */
   HRESULT hr = SHGetMalloc(&shl_imalloc);
   if (hr != S_OK)
-    throw std::runtime_error("Error initializing file system. Report this problem. (SHGetMalloc failed.)");
+    throw std::runtime_error(
+      "Error initializing file system. Report this problem. (SHGetMalloc failed.)");
 
   /* get desktop IShellFolder interface */
   hr = SHGetDesktopFolder(&shl_idesktop);
   if (hr != S_OK)
-    throw std::runtime_error("Error initializing file system. Report this problem. (SHGetDesktopFolder failed.)");
+    throw std::runtime_error(
+      "Error initializing file system. Report this problem. (SHGetDesktopFolder failed.)");
 #endif
 
   // first version of the file system
@@ -216,7 +224,7 @@ FileSystemModule::~FileSystemModule()
 {
   ASSERT(m_instance == this);
 
-  for (auto it=fileitems_map->begin(); it!=fileitems_map->end(); ++it) {
+  for (auto it = fileitems_map->begin(); it != fileitems_map->end(); ++it) {
     delete it->second;
   }
   fileitems_map->clear();
@@ -252,7 +260,7 @@ IFileItem* FileSystemModule::getRootFileItem()
   fileitem = new FileItem(NULL);
   rootitem = fileitem;
 
-  //LOG("FS: Creating root fileitem %p\n", rootitem);
+  // LOG("FS: Creating root fileitem %p\n", rootitem);
 
 #ifdef _WIN32
   {
@@ -267,8 +275,8 @@ IFileItem* FileSystemModule::getRootFileItem()
     fileitem->m_pidl = pidl;
     fileitem->m_fullpidl = pidl;
 
-    SFGAOF attrib = SFGAO_FOLDER;
-    shl_idesktop->GetAttributesOf(1, (LPCITEMIDLIST *)&pidl, &attrib);
+    SFGAOF attrib = SFGAO_FOLDER | SFGAO_HIDDEN;
+    shl_idesktop->GetAttributesOf(1, (LPCITEMIDLIST*)&pidl, &attrib);
 
     update_by_pidl(fileitem, attrib);
   }
@@ -291,7 +299,7 @@ IFileItem* FileSystemModule::getFileItemFromPath(const std::string& path)
 {
   IFileItem* fileitem = NULL;
 
-  //LOG("FS: get_fileitem_from_path(%s)\n", path.c_str());
+  // LOG("FS: get_fileitem_from_path(%s)\n", path.c_str());
 
 #ifdef _WIN32
   {
@@ -302,15 +310,17 @@ IFileItem* FileSystemModule::getFileItemFromPath(const std::string& path)
     // Default folder is desktop folder (the root item in the hierarchy)
     if (path.empty()) {
       fileitem = getRootFileItem();
-      //LOG("FS: > %p (root)\n", fileitem);
+      // LOG("FS: > %p (root)\n", fileitem);
       return fileitem;
     }
 
-    if (shl_idesktop->ParseDisplayName
-          (NULL, NULL,
-           const_cast<LPWSTR>(base::from_utf8(path).c_str()),
-           &cbEaten, &fullpidl, &attrib) != S_OK) {
-      //LOG("FS: > (null)\n");
+    if (shl_idesktop->ParseDisplayName(NULL,
+                                       NULL,
+                                       const_cast<LPWSTR>(base::from_utf8(path).c_str()),
+                                       &cbEaten,
+                                       &fullpidl,
+                                       &attrib) != S_OK) {
+      // LOG("FS: > (null)\n");
       return NULL;
     }
 
@@ -330,7 +340,7 @@ IFileItem* FileSystemModule::getFileItemFromPath(const std::string& path)
   }
 #endif
 
-  //LOG("FS: get_fileitem_from_path(%s) -> %p\n", path.c_str(), fileitem);
+  // LOG("FS: get_fileitem_from_path(%s) -> %p\n", path.c_str(), fileitem);
 
   return fileitem;
 }
@@ -356,7 +366,7 @@ bool FileItem::isHidden() const
   ASSERT(m_displayname != NOTINITIALIZED);
 
 #ifdef _WIN32
-  return false;
+  return m_isHidden;
 #else
   return m_displayname[0] == '.';
 #endif
@@ -378,7 +388,7 @@ bool FileItem::isExistent() const
   if (base::is_directory(fn)) {
     result = true;
     if (!m_is_folder)
-      m_is_folder = true;       // Update the "is folder" flag
+      m_is_folder = true; // Update the "is folder" flag
   }
   else if (base::is_file(fn)) {
     result = true;
@@ -386,7 +396,7 @@ bool FileItem::isExistent() const
       m_is_folder = false;
   }
 
-  FS_TRACE("FS: isExistent() %s -> %s\n", fn.c_str(), (result ? "exists": "DOESN'T EXIST"));
+  FS_TRACE("FS: isExistent() %s -> %s\n", fn.c_str(), (result ? "exists" : "DOESN'T EXIST"));
   return result;
 }
 
@@ -428,19 +438,17 @@ const FileItemList& FileItem::children()
       // if the children list is empty, or the file-system version
       // change (it's like to say: the current m_children list
       // is outdated)...
-      (m_children.empty() ||
-       current_file_system_version > m_version)) {
+      (m_children.empty() || current_file_system_version > m_version)) {
     FileItemList::iterator it;
     FileItem* child;
 
     // we have to mark current items as deprecated
-    for (it=m_children.begin();
-         it!=m_children.end(); ++it) {
+    for (it = m_children.begin(); it != m_children.end(); ++it) {
       child = static_cast<FileItem*>(*it);
       child->m_removed = true;
     }
 
-    //LOG("FS: Loading files for %p (%s)\n", fileitem, fileitem->displayname);
+    // LOG("FS: Loading files for %p (%s)\n", fileitem, fileitem->displayname);
 #ifdef _WIN32
     {
       base::ComPtr<IShellFolder> pFolder;
@@ -450,9 +458,7 @@ const FileItemList& FileItem::children()
         pFolder = shl_idesktop;
       }
       else {
-        hr = shl_idesktop->BindToObject(
-          m_fullpidl, nullptr,
-          IID_IShellFolder, (LPVOID *)&pFolder);
+        hr = shl_idesktop->BindToObject(m_fullpidl, nullptr, IID_IShellFolder, (LPVOID*)&pFolder);
 
         if (hr != S_OK)
           pFolder = nullptr;
@@ -464,8 +470,9 @@ const FileItemList& FileItem::children()
 
         // Get the interface to enumerate subitems
         hr = pFolder->EnumObjects(
-          reinterpret_cast<HWND>(os::instance()->defaultWindow()->nativeHandle()),
-          SHCONTF_FOLDERS | SHCONTF_NONFOLDERS, &pEnum);
+          reinterpret_cast<HWND>(os::System::instance()->defaultWindow()->nativeHandle()),
+          SHCONTF_FOLDERS | SHCONTF_NONFOLDERS | SHCONTF_INCLUDEHIDDEN,
+          &pEnum);
 
         if (hr == S_OK && pEnum) {
           LPITEMIDLIST itempidl[256];
@@ -475,15 +482,13 @@ const FileItemList& FileItem::children()
           while (pEnum->Next(256, itempidl, &fetched) == S_OK && fetched > 0) {
             // Request the SFGAO_FOLDER attribute to know what of the
             // item is file or a folder
-            for (c=0; c<fetched; ++c) {
-              attribs[c] = SFGAO_FOLDER;
-              pFolder->GetAttributesOf(1, (LPCITEMIDLIST*)itempidl, attribs+c);
-            }
+            for (c = 0; c < fetched; ++c)
+              attribs[c] = SFGAO_FOLDER | SFGAO_HIDDEN;
+            pFolder->GetAttributesOf(fetched, (LPCITEMIDLIST*)itempidl, attribs);
 
             // Generate the FileItems
-            for (c=0; c<fetched; ++c) {
-              LPITEMIDLIST fullpidl = concat_pidl(m_fullpidl,
-                                                  itempidl[c]);
+            for (c = 0; c < fetched; ++c) {
+              LPITEMIDLIST fullpidl = concat_pidl(m_fullpidl, itempidl[c]);
 
               child = get_fileitem_by_fullpidl(fullpidl, false);
               if (!child) {
@@ -554,8 +559,7 @@ const FileItemList& FileItem::children()
 #endif
 
     // check old file-items (maybe removed directories or file-items)
-    for (it=m_children.begin();
-         it!=m_children.end(); ) {
+    for (it = m_children.begin(); it != m_children.end();) {
       child = static_cast<FileItem*>(*it);
       ASSERT(child);
 
@@ -594,7 +598,7 @@ os::SurfaceRef FileItem::getThumbnail()
 {
   os::SurfaceRef ref(m_thumbnail.load());
   if (ref)
-    ref->ref();        // base::Ref(T*) doesn't add an extra reference
+    ref->ref(); // base::Ref(T*) doesn't add an extra reference
   return ref;
 }
 
@@ -632,7 +636,7 @@ FileItem::~FileItem()
 {
   FS_TRACE("FS: Destroying FileItem() with parent %p\n", m_parent);
 
-  m_thumbnail.exchange(nullptr);
+  setThumbnail(nullptr);
 
 #ifdef _WIN32
   if (m_fullpidl && m_fullpidl != m_pidl) {
@@ -656,7 +660,7 @@ void FileItem::insertChildSorted(FileItem* child)
   if (std::find(m_children.begin(), m_children.end(), child) != m_children.end())
     return;
 
-  for (auto it=m_children.begin(), end=m_children.end(); it!=end; ++it) {
+  for (auto it = m_children.begin(), end = m_children.end(); it != end; ++it) {
     if (*child < *static_cast<FileItem*>(*it)) {
       m_children.insert(it, child);
       return;
@@ -686,9 +690,9 @@ int FileItem::compare(const FileItem& that) const
 
 static bool calc_is_folder(std::string filename, SFGAOF attrib)
 {
-  return ((attrib & SFGAO_FOLDER) == SFGAO_FOLDER)
-    && (base::get_file_extension(filename) != "zip")
-    && ((!filename.empty() && (*filename.begin()) != ':') || (filename == MYPC_CSLID));
+  return ((attrib & SFGAO_FOLDER) == SFGAO_FOLDER) &&
+         (base::get_file_extension(filename) != "zip") &&
+         ((!filename.empty() && (*filename.begin()) != ':') || (filename == MYPC_CSLID));
 }
 
 static SFGAOF get_pidl_attrib(FileItem* fileitem, SFGAOF attrib)
@@ -703,7 +707,9 @@ static SFGAOF get_pidl_attrib(FileItem* fileitem, SFGAOF attrib)
     pFolder = shl_idesktop;
   else {
     hr = shl_idesktop->BindToObject(fileitem->m_parent->m_fullpidl,
-                                    nullptr, IID_IShellFolder, (LPVOID*)&pFolder);
+                                    nullptr,
+                                    IID_IShellFolder,
+                                    (LPVOID*)&pFolder);
     if (hr != S_OK)
       pFolder = nullptr;
   }
@@ -730,7 +736,9 @@ static void update_by_pidl(FileItem* fileitem, SFGAOF attrib)
   else {
     ASSERT(fileitem->m_parent);
     hr = shl_idesktop->BindToObject(fileitem->m_parent->m_fullpidl,
-                                    nullptr, IID_IShellFolder, (LPVOID*)&pFolder);
+                                    nullptr,
+                                    IID_IShellFolder,
+                                    (LPVOID*)&pFolder);
     if (hr != S_OK)
       pFolder = nullptr;
   }
@@ -738,9 +746,8 @@ static void update_by_pidl(FileItem* fileitem, SFGAOF attrib)
   // Get the file name
 
   if (pFolder &&
-      pFolder->GetDisplayNameOf(fileitem->m_pidl,
-                                SHGDN_NORMAL | SHGDN_FORPARSING,
-                                &strret) == S_OK) {
+      pFolder->GetDisplayNameOf(fileitem->m_pidl, SHGDN_NORMAL | SHGDN_FORPARSING, &strret) ==
+        S_OK) {
     StrRetToBuf(&strret, fileitem->m_pidl, pszName, MAX_PATH);
     fileitem->m_filename = base::to_utf8(pszName);
   }
@@ -756,21 +763,19 @@ static void update_by_pidl(FileItem* fileitem, SFGAOF attrib)
   // Is it a folder?
 
   fileitem->m_is_folder = calc_is_folder(fileitem->m_filename, attrib);
+  #if _WIN32
+  fileitem->m_isHidden = (attrib & SFGAO_HIDDEN ? true : false);
+  #endif
 
   // Get the name to display
 
-  if (fileitem->isFolder() &&
-      pFolder &&
-      pFolder->GetDisplayNameOf(fileitem->m_pidl,
-                                SHGDN_INFOLDER,
-                                &strret) == S_OK) {
+  if (fileitem->isFolder() && pFolder &&
+      pFolder->GetDisplayNameOf(fileitem->m_pidl, SHGDN_INFOLDER, &strret) == S_OK) {
     StrRetToBuf(&strret, fileitem->m_pidl, pszName, MAX_PATH);
     fileitem->m_displayname = base::to_utf8(pszName);
   }
   else if (fileitem->isFolder() &&
-           shl_idesktop->GetDisplayNameOf(fileitem->m_fullpidl,
-                                          SHGDN_INFOLDER,
-                                          &strret) == S_OK) {
+           shl_idesktop->GetDisplayNameOf(fileitem->m_fullpidl, SHGDN_INFOLDER, &strret) == S_OK) {
     StrRetToBuf(&strret, fileitem->m_fullpidl, pszName, MAX_PATH);
     fileitem->m_displayname = base::to_utf8(pszName);
   }
@@ -878,7 +883,7 @@ static void free_pidl(LPITEMIDLIST pidl)
 
 static std::string get_key_for_pidl(LPITEMIDLIST pidl)
 {
-#if 0
+  #if 0
   char *key = base_malloc(get_pidl_size(pidl)+1);
   UINT c, i = 0;
 
@@ -894,47 +899,45 @@ static std::string get_key_for_pidl(LPITEMIDLIST pidl)
   key[i] = 0;
 
   return key;
-#else
+  #else
   STRRET strret;
   WCHAR pszName[MAX_PATH];
   WCHAR key[4096] = { 0 };
   int len;
 
   // Go pidl by pidl from the fullpidl to the root (desktop)
-  //LOG("FS: ***\n");
+  // LOG("FS: ***\n");
   pidl = clone_pidl(pidl);
   while (pidl->mkid.cb > 0) {
-    if (shl_idesktop->GetDisplayNameOf(pidl,
-                                       SHGDN_INFOLDER | SHGDN_FORPARSING,
-                                       &strret) == S_OK) {
+    if (shl_idesktop->GetDisplayNameOf(pidl, SHGDN_INFOLDER | SHGDN_FORPARSING, &strret) == S_OK) {
       if (StrRetToBuf(&strret, pidl, pszName, MAX_PATH) != S_OK)
         pszName[0] = 0;
 
-      //LOG("FS: + %s\n", pszName);
+      // LOG("FS: + %s\n", pszName);
 
       len = wcslen(pszName);
       if (len > 0) {
         if (*key) {
-          if (pszName[len-1] != L'\\') {
-            memmove(key+len+1, key, sizeof(WCHAR)*(wcslen(key)+1));
+          if (pszName[len - 1] != L'\\') {
+            memmove(key + len + 1, key, sizeof(WCHAR) * (wcslen(key) + 1));
             key[len] = L'\\';
           }
           else
-            memmove(key+len, key, sizeof(WCHAR)*(wcslen(key)+1));
+            memmove(key + len, key, sizeof(WCHAR) * (wcslen(key) + 1));
         }
         else
           key[len] = 0;
 
-        memcpy(key, pszName, sizeof(WCHAR)*len);
+        memcpy(key, pszName, sizeof(WCHAR) * len);
       }
     }
     remove_last_pidl(pidl);
   }
   free_pidl(pidl);
 
-  //LOG("FS: =%s\n***\n", key);
+  // LOG("FS: =%s\n***\n", key);
   return base::to_utf8(key);
-#endif
+  #endif
 }
 
 static FileItem* get_fileitem_by_fullpidl(LPITEMIDLIST fullpidl, bool create_if_not)
@@ -981,8 +984,7 @@ static FileItem* get_fileitem_by_fullpidl(LPITEMIDLIST fullpidl, bool create_if_
       return nullptr;
 
     // Get specific pidl attributes
-    if (fileitem->m_pidl &&
-        fileitem->m_parent) {
+    if (fileitem->m_pidl && fileitem->m_parent) {
       attrib = get_pidl_attrib(fileitem.get(), attrib);
     }
   }
@@ -990,7 +992,8 @@ static FileItem* get_fileitem_by_fullpidl(LPITEMIDLIST fullpidl, bool create_if_
   update_by_pidl(fileitem.get(), attrib);
   put_fileitem(fileitem.get());
 
-  //LOG("FS: fileitem %p created %s with parent %p\n", fileitem, fileitem->keyname.c_str(), fileitem->parent);
+  // LOG("FS: fileitem %p created %s with parent %p\n", fileitem, fileitem->keyname.c_str(),
+  // fileitem->parent);
 
   return fileitem.release();
 }
@@ -1005,10 +1008,10 @@ static void put_fileitem(FileItem* fileitem)
 
   ASSERT(fileitem->m_keyname != NOTINITIALIZED);
 
-#ifdef _DEBUG
+  #ifdef _DEBUG
   auto it = fileitems_map->find(get_key_for_pidl(fileitem->m_fullpidl));
   ASSERT(it == fileitems_map->end());
-#endif
+  #endif
 
   // insert this file-item in the hash-table
   fileitems_map->insert(std::make_pair(fileitem->m_keyname, fileitem));
@@ -1058,7 +1061,8 @@ static FileItem* get_fileitem_by_path(const std::string& path, bool create_if_no
 
   // get the parent
   {
-    std::string parent_path = remove_backslash_if_needed(base::join_path(base::get_file_path(path), ""));
+    std::string parent_path = remove_backslash_if_needed(
+      base::join_path(base::get_file_path(path), ""));
     fileitem->m_parent = get_fileitem_by_path(parent_path, true);
   }
 
@@ -1069,7 +1073,7 @@ static FileItem* get_fileitem_by_path(const std::string& path, bool create_if_no
 
 static std::string remove_backslash_if_needed(const std::string& filename)
 {
-  if (!filename.empty() && base::is_path_separator(*(filename.end()-1))) {
+  if (!filename.empty() && base::is_path_separator(*(filename.end() - 1))) {
     int len = filename.size();
 
     // This is just the root '/' slash

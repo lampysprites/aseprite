@@ -6,7 +6,7 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/context.h"
@@ -25,9 +25,9 @@
 #include "ui/system.h"
 
 #ifdef _DEBUG
-#include "doc/layer_tilemap.h"
-#include "doc/tileset.h"
-#include "doc/tilesets.h"
+  #include "doc/layer_tilemap.h"
+  #include "doc/tileset.h"
+  #include "doc/tilesets.h"
 #endif
 
 #include <algorithm>
@@ -35,10 +35,7 @@
 
 namespace app {
 
-Context::Context()
-  : m_docs(this)
-  , m_lastSelectedDoc(nullptr)
-  , m_preferences(nullptr)
+Context::Context() : m_docs(this), m_lastSelectedDoc(nullptr), m_preferences(nullptr)
 {
   m_docs.add_observer(this);
 }
@@ -62,12 +59,7 @@ Preferences& Context::preferences() const
 
 Clipboard* Context::clipboard() const
 {
-#ifdef ENABLE_UI
   return Clipboard::instance();
-#else
-  // TODO support clipboard when !ENABLE_UI
-  throw std::runtime_error("Clipboard not supported");
-#endif
 }
 
 void Context::sendDocumentToTop(Doc* document)
@@ -96,6 +88,14 @@ Doc* Context::activeDocument() const
   return site.document();
 }
 
+const view::RealRange& Context::range() const
+{
+  Site site;
+  onGetActiveSite(&site);
+  m_range = site.range(); // TODO cache this value as much as possible
+  return m_range;
+}
+
 void Context::setActiveDocument(Doc* document)
 {
   onSetActiveDocument(document, true);
@@ -111,7 +111,7 @@ void Context::setActiveFrame(const doc::frame_t frame)
   onSetActiveFrame(frame);
 }
 
-void Context::setRange(const DocRange& range)
+void Context::setRange(const view::RealRange& range)
 {
   onSetRange(range);
 }
@@ -134,9 +134,15 @@ bool Context::hasModifiedDocuments() const
   return false;
 }
 
+void Context::notifyBeforeActiveSiteChanged()
+{
+  const Site site = activeSite();
+  notify_observers<const Site&>(&ContextObserver::onBeforeActiveSiteChange, site);
+}
+
 void Context::notifyActiveSiteChanged()
 {
-  Site site = activeSite();
+  const Site site = activeSite();
   notify_observers<const Site&>(&ContextObserver::onActiveSiteChange, site);
 }
 
@@ -148,9 +154,11 @@ void Context::executeCommandFromMenuOrShortcut(Command* command, const Params& p
   // command (e.g. if we press Cmd-S quickly the program can enter two
   // times in the File > Save command and hang).
   static Command* executingCommand = nullptr;
-  if (executingCommand) {         // Ignore command execution
-    LOG(VERBOSE, "CTXT: Ignoring command %s because we are inside %s\n",
-        command->id().c_str(), executingCommand->id().c_str());
+  if (executingCommand) { // Ignore command execution
+    LOG(VERBOSE,
+        "CTXT: Ignoring command %s because we are inside %s\n",
+        command->id().c_str(),
+        executingCommand->id().c_str());
     return;
   }
   base::ScopedValue commandGuard(executingCommand, command);
@@ -190,6 +198,8 @@ void Context::executeCommand(Command* command, const Params& params)
     }
     else {
       LOG(VERBOSE, "CTXT: Command %s is disabled\n", command->id().c_str());
+      m_result = CommandResult(CommandResult::kDisabled);
+      return;
     }
 
     AfterCommandExecution(ev);
@@ -202,8 +212,7 @@ void Context::executeCommand(Command* command, const Params& params)
     {
       Site site = activeSite();
       // Check that all tileset hash tables are valid
-      if (site.sprite() &&
-          site.sprite()->hasTilesets()) {
+      if (site.sprite() && site.sprite()->hasTilesets()) {
         for (Tileset* tileset : *site.sprite()->tilesets()) {
           if (tileset)
             tileset->assertValidHashTable();
@@ -215,23 +224,23 @@ void Context::executeCommand(Command* command, const Params& params)
   catch (base::Exception& e) {
     m_result = CommandResult(CommandResult::kError);
 
-    LOG(ERROR, "CTXT: Exception caught executing %s command\n%s\n",
-        command->id().c_str(), e.what());
+    LOG(ERROR, "CTXT: Exception caught executing %s command\n%s\n", command->id().c_str(), e.what());
     Console::showException(e);
   }
   catch (std::exception& e) {
     m_result = CommandResult(CommandResult::kError);
 
-    LOG(ERROR, "CTXT: std::exception caught executing %s command\n%s\n",
-        command->id().c_str(), e.what());
+    LOG(ERROR,
+        "CTXT: std::exception caught executing %s command\n%s\n",
+        command->id().c_str(),
+        e.what());
     console.printf("An error ocurred executing the command.\n\nDetails:\n%s", e.what());
   }
 #ifdef NDEBUG
   catch (...) {
     m_result = CommandResult(CommandResult::kError);
 
-    LOG(ERROR, "CTXT: Unknown exception executing %s command\n",
-        command->id().c_str());
+    LOG(ERROR, "CTXT: Unknown exception executing %s command\n", command->id().c_str());
 
     console.printf("An unknown error ocurred executing the command.\n"
                    "Please save your work, close the program, try it\n"
@@ -247,6 +256,11 @@ void Context::setCommandResult(const CommandResult& result)
   m_result = result;
 }
 
+void Context::onBeforeAddDocument(Doc* doc)
+{
+  notifyBeforeActiveSiteChanged();
+}
+
 void Context::onAddDocument(Doc* doc)
 {
   m_lastSelectedDoc = doc;
@@ -254,7 +268,16 @@ void Context::onAddDocument(Doc* doc)
   if (m_activeSiteHandler)
     m_activeSiteHandler->addDoc(doc);
 
-  notifyActiveSiteChanged();
+  // Checking for an active site handler of UI not available avoids a consistency issue
+  // when opening a sprite from the first time, from the home screen, which would notify of an empty
+  // active site twice.
+  if (m_activeSiteHandler || !isUIAvailable())
+    notifyActiveSiteChanged();
+}
+
+void Context::onBeforeRemoveDocument(Doc* doc)
+{
+  notifyBeforeActiveSiteChanged();
 }
 
 void Context::onRemoveDocument(Doc* doc)
@@ -284,7 +307,7 @@ void Context::onSetActiveDocument(Doc* doc, bool notify)
 
 void Context::onSetActiveLayer(doc::Layer* layer)
 {
-  Doc* newDoc = (layer ? static_cast<Doc*>(layer->sprite()->document()): nullptr);
+  Doc* newDoc = (layer ? static_cast<Doc*>(layer->sprite()->document()) : nullptr);
   if (!newDoc)
     return;
 
@@ -304,7 +327,7 @@ void Context::onSetActiveFrame(const doc::frame_t frame)
   notifyActiveSiteChanged();
 }
 
-void Context::onSetRange(const DocRange& range)
+void Context::onSetRange(const view::RealRange& range)
 {
   if (m_lastSelectedDoc)
     activeSiteHandler()->setRangeInDoc(m_lastSelectedDoc, range);

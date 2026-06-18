@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2020-2023  Igara Studio S.A.
+// Copyright (C) 2020-2025  Igara Studio S.A.
 // Copyright (C) 2001-2017  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/ui/notifications.h"
@@ -20,17 +20,18 @@
 
 namespace app {
 
+using namespace app::skin;
 using namespace ui;
 
 class NotificationItem : public MenuItem {
 public:
-  NotificationItem(INotificationDelegate* del)
-    : MenuItem(del->notificationText()),
-      m_delegate(del) {
+  NotificationItem(INotificationDelegate* del) : MenuItem(del->notificationText()), m_delegate(del)
+  {
   }
 
 protected:
-  void onClick() override {
+  void onClick() override
+  {
     MenuItem::onClick();
     m_delegate->notificationClick();
   }
@@ -39,10 +40,7 @@ private:
   INotificationDelegate* m_delegate;
 };
 
-Notifications::Notifications()
-  : Button("")
-  , m_flagStyle(skin::SkinTheme::get(this)->styles.flag())
-  , m_red(false)
+Notifications::Notifications() : Button(""), m_red(false)
 {
 }
 
@@ -52,22 +50,33 @@ void Notifications::addLink(INotificationDelegate* del)
   m_red = true;
 }
 
+void Notifications::onInitTheme(InitThemeEvent& ev)
+{
+  Button::onInitTheme(ev);
+  m_popup.initTheme();
+}
+
 void Notifications::onSizeHint(SizeHintEvent& ev)
 {
-  ev.setSizeHint(gfx::Size(16, 10)*guiscale()); // TODO hard-coded flag size
+  auto* theme = SkinTheme::get(this);
+  auto hint = theme->calcSizeHint(this, theme->styles.flag());
+  ev.setSizeHint(hint);
 }
 
 void Notifications::onPaint(PaintEvent& ev)
 {
+  auto* theme = SkinTheme::get(this);
   Graphics* g = ev.graphics();
 
   PaintWidgetPartInfo info;
-  if (hasMouse()) info.styleFlags |= ui::Style::Layer::kMouse;
-  if (m_red) info.styleFlags |= ui::Style::Layer::kFocus;
-  if (isSelected()) info.styleFlags |= ui::Style::Layer::kSelected;
+  if (hasMouse())
+    info.styleFlags |= ui::Style::Layer::kMouse;
+  if (m_red)
+    info.styleFlags |= ui::Style::Layer::kFocus;
+  if (isSelected())
+    info.styleFlags |= ui::Style::Layer::kSelected;
 
-  theme()->paintWidgetPart(
-    g, m_flagStyle, clientBounds(), info);
+  theme->paintWidgetPart(g, theme->styles.flag(), clientBounds(), info);
 }
 
 void Notifications::onClick()
@@ -76,11 +85,7 @@ void Notifications::onClick()
   invalidate();
 
   gfx::Rect bounds = this->bounds();
-  m_popup.showPopup(
-    gfx::Point(
-      bounds.x - m_popup.sizeHint().w,
-      bounds.y2()),
-    display());
+  m_popup.showPopup(gfx::Point(bounds.x - m_popup.sizeHint().w, bounds.y2()), display());
 }
 
 } // namespace app

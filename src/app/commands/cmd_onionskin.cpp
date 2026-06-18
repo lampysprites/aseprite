@@ -5,10 +5,9 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
-#include "app/app.h"
 #include "app/commands/command.h"
 #include "app/context.h"
 #include "app/doc.h"
@@ -20,18 +19,17 @@ using namespace gfx;
 
 class ShowOnionSkinCommand : public Command {
 public:
-  ShowOnionSkinCommand()
-    : Command(CommandId::ShowOnionSkin(), CmdUIOnlyFlag)
-  {
-  }
+  ShowOnionSkinCommand() : Command(CommandId::ShowOnionSkin()) {}
 
 protected:
-  bool onChecked(Context* context) override {
+  bool onChecked(Context* context) override
+  {
     DocumentPreferences& docPref = Preferences::instance().document(context->activeDocument());
     return docPref.onionskin.active();
   }
 
-  void onExecute(Context* context) override {
+  void onExecute(Context* context) override
+  {
     DocumentPreferences& docPref = Preferences::instance().document(context->activeDocument());
     docPref.onionskin.active(!docPref.onionskin.active());
   }

@@ -1,4 +1,5 @@
 // Aseprite
+// Copyright (C) 2025  Igara Studio S.A.
 // Copyright (C) 2001-2016  David Capello
 //
 // This program is distributed under the terms of
@@ -10,38 +11,30 @@
 
 #include "app/cmd.h"
 #include "app/cmd/with_sprite.h"
-#include "doc/frame.h"
-
-#include <sstream>
+#include "doc/palette.h"
 
 namespace doc {
-  class Palette;
-  class Sprite;
-}
+class Palette;
+class Sprite;
+} // namespace doc
 
-namespace app {
-namespace cmd {
-  using namespace doc;
+namespace app { namespace cmd {
+using namespace doc;
 
-  class AddPalette : public Cmd
-                   , public WithSprite {
-  public:
-    AddPalette(Sprite* sprite, Palette* pal);
+class AddPalette : public Cmd,
+                   public WithSprite {
+public:
+  AddPalette(Sprite* sprite, Palette* pal);
 
-  protected:
-    void onExecute() override;
-    void onUndo() override;
-    size_t onMemSize() const override {
-      return sizeof(*this) + m_size;
-    }
+protected:
+  void onExecute() override;
+  void onUndo() override;
+  size_t onMemSize() const override { return sizeof(*this) + m_palette.getMemSize(); }
 
-  private:
-    size_t m_size;
-    std::stringstream m_stream;
-    frame_t m_frame;
-  };
+private:
+  Palette m_palette;
+};
 
-} // namespace cmd
-} // namespace app
+}} // namespace app::cmd
 
-#endif  // CMD_ADD_PALETTE_H_INCLUDED
+#endif // CMD_ADD_PALETTE_H_INCLUDED

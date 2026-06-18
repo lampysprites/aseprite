@@ -1,19 +1,18 @@
 // Aseprite
-// Copyright (C) 2019-2020  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2017  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/color.h"
 #include "app/commands/command.h"
 #include "app/commands/filters/filter_manager_impl.h"
 #include "app/commands/filters/filter_window.h"
-#include "app/commands/filters/filter_worker.h"
 #include "app/commands/new_params.h"
 #include "app/context.h"
 #include "app/ini_file.h"
@@ -32,24 +31,23 @@
 namespace app {
 
 struct InvertColorParams : public NewParams {
-  Param<bool> ui { this, true, "ui" };
-  Param<filters::Target> channels { this, 0, "channels" };
+  Param<bool> ui{ this, true, "ui" };
+  Param<filters::Target> channels{ this, 0, "channels" };
 };
-
-#ifdef ENABLE_UI
 
 static const char* ConfigSection = "InvertColor";
 
 class InvertColorWindow : public FilterWindow {
 public:
   InvertColorWindow(FilterManagerImpl& filterMgr)
-    : FilterWindow("Invert Color", ConfigSection, &filterMgr,
+    : FilterWindow("Invert Color",
+                   ConfigSection,
+                   &filterMgr,
                    WithChannelsSelector,
-                   WithoutTiledCheckBox) {
+                   WithoutTiledCheckBox)
+  {
   }
 };
-
-#endif  // ENABLE_UI
 
 class InvertColorCommand : public CommandWithNewParams<InvertColorParams> {
 public:
@@ -61,7 +59,7 @@ protected:
 };
 
 InvertColorCommand::InvertColorCommand()
-  : CommandWithNewParams<InvertColorParams>(CommandId::InvertColor(), CmdRecordableFlag)
+  : CommandWithNewParams<InvertColorParams>(CommandId::InvertColor())
 {
 }
 
@@ -73,28 +71,22 @@ bool InvertColorCommand::onEnabled(Context* context)
 
 void InvertColorCommand::onExecute(Context* context)
 {
-#ifdef ENABLE_UI
   const bool ui = (params().ui() && context->isUIAvailable());
-#endif
 
   InvertColorFilter filter;
   FilterManagerImpl filterMgr(context, &filter);
-  filterMgr.setTarget(TARGET_RED_CHANNEL |
-                      TARGET_GREEN_CHANNEL |
-                      TARGET_BLUE_CHANNEL |
+  filterMgr.setTarget(TARGET_RED_CHANNEL | TARGET_GREEN_CHANNEL | TARGET_BLUE_CHANNEL |
                       TARGET_GRAY_CHANNEL);
 
-  if (params().channels.isSet()) filterMgr.setTarget(params().channels());
+  if (params().channels.isSet())
+    filterMgr.setTarget(params().channels());
 
-#ifdef ENABLE_UI
   if (ui) {
     InvertColorWindow window(filterMgr);
     window.doModal();
   }
-  else
-#endif // ENABLE_UI
-  {
-    start_filter_worker(&filterMgr);
+  else {
+    filterMgr.startWorker(false);
   }
 }
 

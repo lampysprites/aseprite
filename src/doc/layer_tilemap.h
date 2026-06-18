@@ -1,5 +1,5 @@
 // Aseprite Document Library
-// Copyright (c) 2019-2020  Igara Studio S.A.
+// Copyright (c) 2019-2025  Igara Studio S.A.
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
@@ -14,25 +14,26 @@
 
 namespace doc {
 
-  class LayerTilemap : public LayerImage {
-  public:
-    explicit LayerTilemap(Sprite* sprite, const tileset_index tsi);
-    ~LayerTilemap();
+// Renders a tilemap on each cel using a tileset.
+class LayerTilemap final : public LayerImage {
+public:
+  LayerTilemap(Sprite* sprite, tileset_index tsi);
+  ~LayerTilemap();
 
-    Grid grid() const override;
+  Grid grid() const override;
 
-    // Returns the tileset of this layer. New automatically-created
-    // tiles should be stored into this tileset, and all tiles in the
-    // layer should share the same Grid spec.
-    Tileset* tileset() const { return m_tileset; }
-    tileset_index tilesetIndex() const { return m_tilesetIndex; }
+  // Returns the tileset of this layer. New automatically-created
+  // tiles should be stored into this tileset, and all tiles in the
+  // layer should share the same Grid spec.
+  Tileset* tileset() const { return m_tileset; }
+  tileset_index tilesetIndex() const { return m_tilesetIndex; }
 
-    void setTilesetIndex(tileset_index tsi);
+  void setTilesetIndex(tileset_index tsi);
 
-  private:
-    Tileset* m_tileset;
-    tileset_index m_tilesetIndex;
-  };
+private:
+  Tileset* m_tileset;
+  tileset_index m_tilesetIndex;
+};
 
 } // namespace doc
 

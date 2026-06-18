@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019-2020  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2017-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/cmd/set_slice_key.h"
@@ -39,7 +39,7 @@ private:
 };
 
 SlicePropertiesCommand::SlicePropertiesCommand()
-  : Command(CommandId::SliceProperties(), CmdUIOnlyFlag)
+  : Command(CommandId::SliceProperties())
   , m_sliceId(NullId)
 {
 }
@@ -57,14 +57,13 @@ void SlicePropertiesCommand::onLoadParams(const Params& params)
 
 bool SlicePropertiesCommand::onEnabled(Context* context)
 {
-  return context->checkFlags(ContextFlags::ActiveDocumentIsWritable);
+  return context->isUIAvailable() && context->checkFlags(ContextFlags::ActiveDocumentIsWritable);
 }
 
 void SlicePropertiesCommand::onExecute(Context* context)
 {
   const ContextReader reader(context);
   const Sprite* sprite = reader.sprite();
-  frame_t frame = reader.frame();
   SelectedObjects slices;
 
   {
@@ -77,12 +76,25 @@ void SlicePropertiesCommand::onExecute(Context* context)
     if (slice)
       slices.insert(slice->id());
     else
-      slices = reader.site()->selectedSlices();
+      slices = reader.site().selectedSlices();
   }
 
   // Nothing to delete
   if (slices.empty())
     return;
+
+  const bool useKeys = Preferences::instance().slices.useKeys();
+  frame_t frame = (useKeys ? reader.frame() : 0);
+  if (!useKeys) {
+    // If there is one selected slice with multiple keys, we will
+    // modify the key in from the current frame.
+    for (Slice* slice : slices.iterateAs<Slice>()) {
+      if (slice->size() > 1) {
+        frame = reader.frame();
+        break;
+      }
+    }
+  }
 
   SliceWindow window(sprite, slices, frame);
   if (!window.show())
@@ -102,9 +114,10 @@ void SlicePropertiesCommand::onExecute(Context* context)
       }
 
       // Change user data
-      if ((mods & SliceWindow::kUserData) &&
-          slice->userData() != window.userDataValue()) {
-        tx(new cmd::SetUserData(slice, window.userDataValue(), static_cast<Doc*>(sprite->document())));
+      if ((mods & SliceWindow::kUserData) && slice->userData() != window.userDataValue()) {
+        tx(new cmd::SetUserData(slice,
+                                window.userDataValue(),
+                                static_cast<Doc*>(sprite->document())));
       }
 
       // Change slice properties
@@ -116,22 +129,31 @@ void SlicePropertiesCommand::onExecute(Context* context)
       gfx::Rect newBounds = newKey.bounds();
       gfx::Rect newCenter = newKey.center();
       gfx::Point newPivot = newKey.pivot();
-      if (mods & SliceWindow::kBoundsX) newBounds.x = window.boundsValue().x;
-      if (mods & SliceWindow::kBoundsY) newBounds.y = window.boundsValue().y;
-      if (mods & SliceWindow::kBoundsW) newBounds.w = window.boundsValue().w;
-      if (mods & SliceWindow::kBoundsH) newBounds.h = window.boundsValue().h;
-      if (mods & SliceWindow::kCenterX) newCenter.x = window.centerValue().x;
-      if (mods & SliceWindow::kCenterY) newCenter.y = window.centerValue().y;
-      if (mods & SliceWindow::kCenterW) newCenter.w = window.centerValue().w;
-      if (mods & SliceWindow::kCenterH) newCenter.h = window.centerValue().h;
-      if (mods & SliceWindow::kPivotX) newPivot.x = window.pivotValue().x;
-      if (mods & SliceWindow::kPivotY) newPivot.y = window.pivotValue().y;
+      if (mods & SliceWindow::kBoundsX)
+        newBounds.x = window.boundsValue().x;
+      if (mods & SliceWindow::kBoundsY)
+        newBounds.y = window.boundsValue().y;
+      if (mods & SliceWindow::kBoundsW)
+        newBounds.w = window.boundsValue().w;
+      if (mods & SliceWindow::kBoundsH)
+        newBounds.h = window.boundsValue().h;
+      if (mods & SliceWindow::kCenterX)
+        newCenter.x = window.centerValue().x;
+      if (mods & SliceWindow::kCenterY)
+        newCenter.y = window.centerValue().y;
+      if (mods & SliceWindow::kCenterW)
+        newCenter.w = window.centerValue().w;
+      if (mods & SliceWindow::kCenterH)
+        newCenter.h = window.centerValue().h;
+      if (mods & SliceWindow::kPivotX)
+        newPivot.x = window.pivotValue().x;
+      if (mods & SliceWindow::kPivotY)
+        newPivot.y = window.pivotValue().y;
       newKey.setBounds(newBounds);
       newKey.setCenter(newCenter);
       newKey.setPivot(newPivot);
 
-      if (key->bounds() != newKey.bounds() ||
-          key->center() != newKey.center() ||
+      if (key->bounds() != newKey.bounds() || key->center() != newKey.center() ||
           key->pivot() != newKey.pivot()) {
         tx(new cmd::SetSliceKey(slice, frame, newKey));
       }

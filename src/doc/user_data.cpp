@@ -1,11 +1,11 @@
 // Aseprite Document Library
-// Copyright (c) 2023  Igara Studio S.A.
+// Copyright (c) 2023-2025  Igara Studio S.A.
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "doc/user_data.h"
@@ -71,8 +71,8 @@ uint16_t all_elements_of_same_type(const UserData::Vector& vector)
 
   // If our common reduced type is unsigned and we have negative numbers
   // in our vector we should select the next signed type that includes it.
-  if (commonReducedType != 0 &&
-      (commonReducedType & 1) && // TODO fix this assumption about USER_DATA_PROPERTY_TYPE_* values
+  if (commonReducedType != 0 && (commonReducedType & 1) && // TODO fix this assumption about
+                                                           // USER_DATA_PROPERTY_TYPE_* values
       hasNegativeNumbers) {
     commonReducedType++;
     // We couldn't find one type that satisfies all the integers. This
@@ -169,55 +169,92 @@ UserData::Variant reduce_int_type_size(const UserData::Variant& value)
   switch (value.type()) {
     case USER_DATA_PROPERTY_TYPE_INT16: {
       auto v = get_value<int16_t>(value);
-      if (is_compatible_int<int8_t>(v)) return static_cast<int8_t>(v);
-      else if (is_compatible_int<uint8_t>(v)) return static_cast<uint8_t>(v);
+      if (is_compatible_int<int8_t>(v))
+        return static_cast<int8_t>(v);
+      else if (is_compatible_int<uint8_t>(v))
+        return static_cast<uint8_t>(v);
       return v;
     }
     case USER_DATA_PROPERTY_TYPE_UINT16: {
       auto v = get_value<uint16_t>(value);
-      if (is_compatible_int<int8_t>(v)) return static_cast<int8_t>(v);
-      else if (is_compatible_int<uint8_t>(v)) return static_cast<uint8_t>(v);
+      if (is_compatible_int<int8_t>(v))
+        return static_cast<int8_t>(v);
+      else if (is_compatible_int<uint8_t>(v))
+        return static_cast<uint8_t>(v);
       return v;
     }
     case USER_DATA_PROPERTY_TYPE_INT32: {
       auto v = get_value<int32_t>(value);
-      if (is_compatible_int<int8_t>(v)) return static_cast<int8_t>(v);
-      else if (is_compatible_int<uint8_t>(v)) return static_cast<uint8_t>(v);
-      else if (is_compatible_int<int16_t>(v)) return static_cast<int16_t>(v);
-      else if (is_compatible_int<uint16_t>(v)) return static_cast<uint16_t>(v);
+      if (is_compatible_int<int8_t>(v))
+        return static_cast<int8_t>(v);
+      else if (is_compatible_int<uint8_t>(v))
+        return static_cast<uint8_t>(v);
+      else if (is_compatible_int<int16_t>(v))
+        return static_cast<int16_t>(v);
+      else if (is_compatible_int<uint16_t>(v))
+        return static_cast<uint16_t>(v);
       return v;
     }
     case USER_DATA_PROPERTY_TYPE_UINT32: {
       auto v = get_value<uint32_t>(value);
-      if (is_compatible_int<int8_t>(v)) return static_cast<int8_t>(v);
-      else if (is_compatible_int<uint8_t>(v)) return static_cast<uint8_t>(v);
-      else if (is_compatible_int<int16_t>(v)) return static_cast<int16_t>(v);
-      else if (is_compatible_int<uint16_t>(v)) return static_cast<uint16_t>(v);
+      if (is_compatible_int<int8_t>(v))
+        return static_cast<int8_t>(v);
+      else if (is_compatible_int<uint8_t>(v))
+        return static_cast<uint8_t>(v);
+      else if (is_compatible_int<int16_t>(v))
+        return static_cast<int16_t>(v);
+      else if (is_compatible_int<uint16_t>(v))
+        return static_cast<uint16_t>(v);
       return v;
     }
     case USER_DATA_PROPERTY_TYPE_INT64: {
       auto v = get_value<int64_t>(value);
-      if (is_compatible_int<int8_t>(v)) return static_cast<int8_t>(v);
-      else if (is_compatible_int<uint8_t>(v)) return static_cast<uint8_t>(v);
-      else if (is_compatible_int<int16_t>(v)) return static_cast<int16_t>(v);
-      else if (is_compatible_int<uint16_t>(v)) return static_cast<uint16_t>(v);
-      else if (is_compatible_int<int32_t>(v)) return static_cast<int32_t>(v);
-      else if (is_compatible_int<uint32_t>(v)) return static_cast<uint32_t>(v);
+      if (is_compatible_int<int8_t>(v))
+        return static_cast<int8_t>(v);
+      else if (is_compatible_int<uint8_t>(v))
+        return static_cast<uint8_t>(v);
+      else if (is_compatible_int<int16_t>(v))
+        return static_cast<int16_t>(v);
+      else if (is_compatible_int<uint16_t>(v))
+        return static_cast<uint16_t>(v);
+      else if (is_compatible_int<int32_t>(v))
+        return static_cast<int32_t>(v);
+      else if (is_compatible_int<uint32_t>(v))
+        return static_cast<uint32_t>(v);
       return v;
     }
     case USER_DATA_PROPERTY_TYPE_UINT64: {
       auto v = get_value<uint64_t>(value);
-      if (is_compatible_int<int8_t>(v)) return static_cast<int8_t>(v);
-      else if (is_compatible_int<uint8_t>(v)) return static_cast<uint8_t>(v);
-      else if (is_compatible_int<int16_t>(v)) return static_cast<int16_t>(v);
-      else if (is_compatible_int<uint16_t>(v)) return static_cast<uint16_t>(v);
-      else if (is_compatible_int<int32_t>(v)) return static_cast<int32_t>(v);
-      else if (is_compatible_int<uint32_t>(v)) return static_cast<uint32_t>(v);
+      if (is_compatible_int<int8_t>(v))
+        return static_cast<int8_t>(v);
+      else if (is_compatible_int<uint8_t>(v))
+        return static_cast<uint8_t>(v);
+      else if (is_compatible_int<int16_t>(v))
+        return static_cast<int16_t>(v);
+      else if (is_compatible_int<uint16_t>(v))
+        return static_cast<uint16_t>(v);
+      else if (is_compatible_int<int32_t>(v))
+        return static_cast<int32_t>(v);
+      else if (is_compatible_int<uint32_t>(v))
+        return static_cast<uint32_t>(v);
       return v;
     }
-    default:
-      return value;
+    default: return value;
   }
 }
 
+void set_property_value(UserData::Properties& properties,
+                        const std::string& field,
+                        UserData::Variant&& value)
+{
+  if (value.type() == USER_DATA_PROPERTY_TYPE_NULLPTR) {
+    auto it = properties.find(field);
+    if (it != properties.end())
+      properties.erase(it);
+  }
+  else {
+    properties[field] = std::move(value);
+  }
 }
+
+} // namespace doc

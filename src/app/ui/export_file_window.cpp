@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019-2024  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/ui/export_file_window.h"
@@ -35,25 +35,32 @@ ExportFileWindow::ExportFileWindow(const Doc* doc)
   , m_preferredResize(1)
 {
   // Is a default output filename in the preferences?
+  outputField()->setDocFilename(doc->filename());
   if (!m_docPref.saveCopy.filename().empty()) {
-    setOutputFilename(m_docPref.saveCopy.filename());
+    outputField()->setFilename(m_docPref.saveCopy.filename());
   }
   else {
-    std::string newFn = base::replace_extension(
-      doc->filename(),
-      defaultExtension());
-    if (newFn == doc->filename()) {
+    std::string base = doc->filename();
+    const std::string basePath = (base::get_file_path(base).empty() ? base::get_current_path() :
+                                                                      base::get_file_path(base));
+    base = base::join_path(basePath, base::get_file_title(base));
+
+    std::string newFn = base::replace_extension(base, defaultExtension());
+    if (newFn == base::replace_extension(base, base::get_file_extension(doc->filename()))) {
       newFn = base::join_path(
         base::get_file_path(newFn),
         base::get_file_title(newFn) + "-export." + base::get_file_extension(newFn));
     }
-    setOutputFilename(newFn);
+    outputField()->setFilename(newFn);
   }
 
   // Default export configuration
   setResizeScale(m_docPref.saveCopy.resizeScale());
   fill_area_combobox(m_doc->sprite(), area(), m_docPref.saveCopy.area());
-  fill_layers_combobox(m_doc->sprite(), layers(), m_docPref.saveCopy.layer(), m_docPref.saveCopy.layerIndex());
+  fill_layers_combobox(m_doc->sprite(),
+                       layers(),
+                       m_docPref.saveCopy.layer(),
+                       m_docPref.saveCopy.layerIndex());
   fill_frames_combobox(m_doc->sprite(), frames(), m_docPref.saveCopy.frameTag());
   fill_anidir_combobox(anidir(), m_docPref.saveCopy.aniDir());
 
@@ -67,39 +74,27 @@ ExportFileWindow::ExportFileWindow(const Doc* doc)
     pixelRatio()->setVisible(false);
   }
 
+  outputField()->Change.connect([this] { onOutputFieldChange(); });
   forTwitter()->setSelected(m_docPref.saveCopy.forTwitter());
   adjustResize()->setVisible(false);
   playSubtags()->setSelected(m_docPref.saveCopy.playSubtags());
+  ignoreEmpty()->setSelected(m_docPref.saveCopy.ignoreEmpty());
   // Here we don't call updateAniDir() because it's already filled and
   // set by the function fill_anidir_combobox(). So if the user
   // exported a tag with a specific AniDir, we want to keep the option
   // in the preference (instead of the tag's AniDir).
-  //updateAniDir();
+  // updateAniDir();
   updatePlaySubtags();
-
   updateAdjustResizeButton();
 
-  outputFilename()->Change.connect(
-    [this]{
-      m_outputFilename = outputFilename()->text();
-      onOutputFilenameEntryChange();
-    });
-  outputFilenameBrowse()->Click.connect(
-    [this]{
-      std::string fn = SelectOutputFile();
-      if (!fn.empty()) {
-        setOutputFilename(fn);
-      }
-    });
-
-  resize()->Change.connect([this]{ updateAdjustResizeButton(); });
-  frames()->Change.connect([this]{
+  resize()->Change.connect([this] { updateAdjustResizeButton(); });
+  frames()->Change.connect([this] {
     updateAniDir();
     updatePlaySubtags();
   });
-  forTwitter()->Click.connect([this]{ updateAdjustResizeButton(); });
-  adjustResize()->Click.connect([this]{ onAdjustResize(); });
-  ok()->Click.connect([this]{ onOK(); });
+  forTwitter()->Click.connect([this] { updateAdjustResizeButton(); });
+  adjustResize()->Click.connect([this] { onAdjustResize(); });
+  ok()->Click.connect([this] { onOK(); });
 }
 
 bool ExportFileWindow::show()
@@ -110,7 +105,7 @@ bool ExportFileWindow::show()
 
 void ExportFileWindow::savePref()
 {
-  m_docPref.saveCopy.filename(outputFilenameValue());
+  m_docPref.saveCopy.filename(outputField()->fullFilename());
   m_docPref.saveCopy.resizeScale(resizeValue());
   m_docPref.saveCopy.area(areaValue());
   m_docPref.saveCopy.layer(layersValue());
@@ -120,12 +115,7 @@ void ExportFileWindow::savePref()
   m_docPref.saveCopy.applyPixelRatio(applyPixelRatio());
   m_docPref.saveCopy.forTwitter(isForTwitter());
   m_docPref.saveCopy.playSubtags(isPlaySubtags());
-}
-
-std::string ExportFileWindow::outputFilenameValue() const
-{
-  return base::join_path(m_outputPath,
-                         m_outputFilename);
+  m_docPref.saveCopy.ignoreEmpty(isIgnoreEmpty());
 }
 
 double ExportFileWindow::resizeValue() const
@@ -175,6 +165,11 @@ bool ExportFileWindow::isForTwitter() const
   return forTwitter()->isSelected();
 }
 
+bool ExportFileWindow::isIgnoreEmpty() const
+{
+  return ignoreEmpty()->isSelected();
+}
+
 void ExportFileWindow::setResizeScale(double scale)
 {
   resize()->setValue(fmt::format("{:.2f}", 100.0 * scale));
@@ -190,34 +185,18 @@ void ExportFileWindow::setAniDir(const doc::AniDir aniDir)
   anidir()->setSelectedItemIndex(int(aniDir));
 }
 
-void ExportFileWindow::setOutputFilename(const std::string& pathAndFilename)
+void ExportFileWindow::onOutputFieldChange()
 {
-  m_outputPath = base::get_file_path(pathAndFilename);
-  m_outputFilename = base::get_file_name(pathAndFilename);
-
-  updateOutputFilenameEntry();
-}
-
-void ExportFileWindow::updateOutputFilenameEntry()
-{
-  outputFilename()->setText(m_outputFilename);
-  onOutputFilenameEntryChange();
-}
-
-void ExportFileWindow::onOutputFilenameEntryChange()
-{
-  ok()->setEnabled(!m_outputFilename.empty());
+  ok()->setEnabled(!outputField()->filename().empty());
 }
 
 void ExportFileWindow::updateAniDir()
 {
   std::string framesValue = this->framesValue();
-  if (!framesValue.empty() &&
-      framesValue != kAllFrames &&
-      framesValue != kSelectedFrames) {
+  if (!framesValue.empty() && framesValue != kAllFrames && framesValue != kSelectedFrames) {
     SelectedFrames selFrames;
-    Tag* tag = calculate_selected_frames(
-      UIContext::instance()->activeSite(), framesValue, selFrames);
+    Tag* tag =
+      calculate_selected_frames(UIContext::instance()->activeSite(), framesValue, selFrames);
     if (tag)
       anidir()->setSelectedItemIndex(int(tag->aniDir()));
   }
@@ -239,20 +218,17 @@ void ExportFileWindow::updateAdjustResizeButton()
   // Calculate a better size for Twitter
   m_preferredResize = 1;
   while (m_preferredResize < 10 &&
-         (m_doc->width()*m_preferredResize < 240 ||
-          m_doc->height()*m_preferredResize < 240)) {
+         (m_doc->width() * m_preferredResize < 240 || m_doc->height() * m_preferredResize < 240)) {
     ++m_preferredResize;
   }
 
-  const bool newState =
-    forTwitter()->isSelected() &&
-    ((int)resizeValue() < m_preferredResize);
+  const bool newState = forTwitter()->isSelected() && ((int)resizeValue() < m_preferredResize);
 
   if (adjustResize()->isVisible() != newState) {
     adjustResize()->setVisible(newState);
-    if (newState)
-      adjustResize()->setText(fmt::format(Strings::export_file_adjust_resize(),
-                                          100 * m_preferredResize));
+    if (newState) {
+      adjustResize()->setText(Strings::export_file_adjust_resize(100 * m_preferredResize));
+    }
     adjustResize()->parent()->layout();
   }
 }
@@ -268,19 +244,16 @@ void ExportFileWindow::onAdjustResize()
 void ExportFileWindow::onOK()
 {
   base::paths exts = get_writable_extensions();
-  std::string ext = base::string_to_lower(
-    base::get_file_extension(m_outputFilename));
+  std::string ext = base::string_to_lower(base::get_file_extension(outputField()->filename()));
 
   // Add default extension to output filename
   if (std::find(exts.begin(), exts.end(), ext) == exts.end()) {
     if (ext.empty()) {
-      m_outputFilename =
-        base::replace_extension(m_outputFilename,
-                                defaultExtension());
+      outputField()->setFilenameQuiet(
+        base::replace_extension(outputField()->filename(), defaultExtension()));
     }
     else {
-      ui::Alert::show(
-        fmt::format(Strings::alerts_unknown_output_file_format_error(), ext));
+      ui::Alert::show(Strings::alerts_unknown_output_file_format_error(ext));
       return;
     }
   }

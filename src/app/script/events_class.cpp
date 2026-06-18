@@ -1,11 +1,11 @@
 // Aseprite
-// Copyright (C) 2021-2023  Igara Studio S.A.
+// Copyright (C) 2021-2024  Igara Studio S.A.
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
@@ -37,10 +37,9 @@
 // This event was disabled because it can be triggered in a background thread
 // when any effect (e.g. like Replace Color or Convolution Matrix) is running.
 // And running script code in a background is not supported.
-//#define ENABLE_REMAP_TILESET_EVENT
+// #define ENABLE_REMAP_TILESET_EVENT 1
 
-namespace app {
-namespace script {
+namespace app { namespace script {
 
 using namespace doc;
 
@@ -59,14 +58,15 @@ class Events {
 public:
   using EventType = int;
 
-  Events() { }
-  virtual ~Events() { }
+  Events() {}
+  virtual ~Events() {}
   Events(const Events&) = delete;
   Events& operator=(const Events&) = delete;
 
   virtual EventType eventType(const char* eventName) const = 0;
 
-  bool hasListener(EventListener callbackRef) const {
+  bool hasListener(EventListener callbackRef) const
+  {
     for (auto& listeners : m_listeners) {
       for (EventListener listener : listeners) {
         if (listener == callbackRef)
@@ -76,9 +76,10 @@ public:
     return false;
   }
 
-  void add(EventType eventType, EventListener callbackRef) {
+  void add(EventType eventType, EventListener callbackRef)
+  {
     if (eventType >= m_listeners.size())
-      m_listeners.resize(eventType+1);
+      m_listeners.resize(eventType + 1);
 
     auto& listeners = m_listeners[eventType];
     listeners.push_back(callbackRef);
@@ -86,13 +87,14 @@ public:
       onAddFirstListener(eventType);
   }
 
-  void remove(EventListener callbackRef) {
-    for (int i=0; i<int(m_listeners.size()); ++i) {
+  void remove(EventListener callbackRef)
+  {
+    for (int i = 0; i < int(m_listeners.size()); ++i) {
       EventListeners& listeners = m_listeners[i];
       auto it = listeners.begin();
       auto end = listeners.end();
       bool removed = false;
-      for (; it != end; ) {
+      for (; it != end;) {
         if (*it == callbackRef) {
           removed = true;
           it = listeners.erase(it);
@@ -108,7 +110,8 @@ public:
 
 protected:
   void call(EventType eventType,
-            const std::initializer_list<std::pair<const std::string, std::any>>& args = {}) {
+            const std::initializer_list<std::pair<const std::string, std::any>>& args = {})
+  {
     if (eventType >= m_listeners.size())
       return;
 
@@ -123,7 +126,7 @@ protected:
         int callbackArgs = 0;
         if (args.size() > 0) {
           ++callbackArgs;
-          lua_newtable(L);       // Create "ev" argument with fields about the event
+          lua_newtable(L); // Create "ev" argument with fields about the event
           for (const auto& kv : args) {
             push_value_to_lua(L, kv.second);
             lua_setfield(L, -2, kv.first.c_str());
@@ -152,11 +155,12 @@ private:
 // Used in BeforeCommand
 static bool s_stopPropagationFlag = false;
 
-class AppEvents : public Events
-                , private ContextObserver {
+class AppEvents : public Events,
+                  private ContextObserver {
 public:
   enum : EventType {
     Unknown = -1,
+    BeforeSiteChange,
     SiteChange,
     FgColorChange,
     BgColorChange,
@@ -164,12 +168,14 @@ public:
     AfterCommand,
   };
 
-  AppEvents() {
-  }
+  AppEvents() : m_addedObserver(0) {}
 
-  EventType eventType(const char* eventName) const override {
+  EventType eventType(const char* eventName) const override
+  {
     if (std::strcmp(eventName, "sitechange") == 0)
       return SiteChange;
+    else if (std::strcmp(eventName, "beforesitechange") == 0)
+      return BeforeSiteChange;
     else if (std::strcmp(eventName, "fgcolorchange") == 0)
       return FgColorChange;
     else if (std::strcmp(eventName, "bgcolorchange") == 0)
@@ -183,86 +189,114 @@ public:
   }
 
 private:
-
-  void onAddFirstListener(EventType eventType) override {
+  void onAddFirstListener(EventType eventType) override
+  {
     auto app = App::instance();
     auto ctx = app->context();
     auto& pref = Preferences::instance();
     switch (eventType) {
-      case SiteChange:
-        ctx->add_observer(this);
-        break;
+      case BeforeSiteChange: [[fallthrough]];
+      case SiteChange:       {
+        if (m_addedObserver == 0)
+          ctx->add_observer(this);
+
+        ++m_addedObserver;
+      } break;
       case FgColorChange:
-        m_fgConn = pref.colorBar.fgColor.AfterChange
-          .connect([this]{ onFgColorChange(); });
+        m_fgConn = pref.colorBar.fgColor.AfterChange.connect([this] { onFgColorChange(); });
         break;
       case BgColorChange:
-        m_bgConn = pref.colorBar.bgColor.AfterChange
-          .connect([this]{ onBgColorChange(); });
+        m_bgConn = pref.colorBar.bgColor.AfterChange.connect([this] { onBgColorChange(); });
         break;
       case BeforeCommand:
-        m_beforeCmdConn = ctx->BeforeCommandExecution
-          .connect(&AppEvents::onBeforeCommand, this);
+        m_beforeCmdConn = ctx->BeforeCommandExecution.connect(&AppEvents::onBeforeCommand, this);
         break;
       case AfterCommand:
-        m_afterCmdConn = ctx->AfterCommandExecution
-          .connect(&AppEvents::onAfterCommand, this);
+        m_afterCmdConn = ctx->AfterCommandExecution.connect(&AppEvents::onAfterCommand, this);
         break;
     }
   }
 
-  void onRemoveLastListener(EventType eventType) override {
+  void onRemoveLastListener(EventType eventType) override
+  {
     switch (eventType) {
+      case BeforeSiteChange: [[fallthrough]];
       case SiteChange:
-        App::instance()->context()->remove_observer(this);
+        --m_addedObserver;
+
+        if (m_addedObserver == 0)
+          App::instance()->context()->remove_observer(this);
         break;
-      case FgColorChange:
-        m_fgConn.disconnect();
-        break;
-      case BgColorChange:
-        m_bgConn.disconnect();
-        break;
-      case BeforeCommand:
-        m_beforeCmdConn.disconnect();
-        break;
-      case AfterCommand:
-        m_afterCmdConn.disconnect();
-        break;
+      case FgColorChange: m_fgConn.disconnect(); break;
+      case BgColorChange: m_bgConn.disconnect(); break;
+      case BeforeCommand: m_beforeCmdConn.disconnect(); break;
+      case AfterCommand:  m_afterCmdConn.disconnect(); break;
     }
   }
 
-  void onFgColorChange() {
-    call(FgColorChange);
-  }
+  void onFgColorChange() { call(FgColorChange); }
 
-  void onBgColorChange() {
-    call(BgColorChange);
-  }
+  void onBgColorChange() { call(BgColorChange); }
 
-  void onBeforeCommand(CommandExecutionEvent& ev) {
+  void onBeforeCommand(CommandExecutionEvent& ev)
+  {
     s_stopPropagationFlag = false;
-    call(BeforeCommand, { { "name", ev.command()->id() },
-                          { "params", ev.params() },
-                          { "stopPropagation",
-                            (lua_CFunction)
-                            [](lua_State*) -> int {
-                              s_stopPropagationFlag = true;
-                              return 0;
-                            } } });
+
+    auto stopPropagation = (lua_CFunction)[](lua_State*)->int
+    {
+      s_stopPropagationFlag = true;
+      return 0;
+    };
+
+    call(BeforeCommand,
+         {
+           { "name",            ev.command()->id() },
+           { "params",          ev.params()        },
+           { "stopPropagation", stopPropagation    }
+    });
     if (s_stopPropagationFlag)
       ev.cancel();
   }
 
-  void onAfterCommand(CommandExecutionEvent& ev) {
-    call(AfterCommand, { { "name", ev.command()->id() },
-                         { "params", ev.params() } });
+  void onAfterCommand(CommandExecutionEvent& ev)
+  {
+    call(AfterCommand,
+         {
+           { "name",   ev.command()->id() },
+           { "params", ev.params()        }
+    });
   }
 
   // ContextObserver impl
-  void onActiveSiteChange(const Site& site) override {
-    const bool fromUndo = (site.document() &&
-                           site.document()->isUndoing());
-    call(SiteChange, { { "fromUndo", fromUndo } });
+  void onActiveSiteChange(const Site& site) override
+  {
+    if (m_lastActiveSite.has_value() && *m_lastActiveSite == site) {
+      // Avoid multiple events that can happen when closing since
+      // we're changing views at the same time we're removing
+      // documents
+      return;
+    }
+
+    const bool fromUndo = (site.document() && site.document()->isUndoing());
+    call(SiteChange,
+         {
+           { "fromUndo", fromUndo }
+    });
+    m_lastBeforeActiveSite = std::nullopt;
+    m_lastActiveSite = site;
+  }
+
+  void onBeforeActiveSiteChange(const Site& fromSite) override
+  {
+    if (m_lastBeforeActiveSite.has_value() && *m_lastBeforeActiveSite == fromSite)
+      return;
+
+    const bool fromUndo = (fromSite.document() && fromSite.document()->isUndoing());
+    call(BeforeSiteChange,
+         {
+           { "fromUndo", fromUndo }
+    });
+    m_lastBeforeActiveSite = fromSite;
   }
 
   obs::scoped_connection m_fgConn;
@@ -270,23 +304,26 @@ private:
   obs::scoped_connection m_beforeCmdConn;
   obs::scoped_connection m_afterCmdConn;
   obs::scoped_connection m_beforePaintConn;
-};
 
-class WindowEvents : public Events
-                   , private ContextObserver {
+  int m_addedObserver;
+  std::optional<Site> m_lastActiveSite;
+  std::optional<Site> m_lastBeforeActiveSite;
+}; // namespace app
+
+class WindowEvents : public Events,
+                     private ContextObserver {
 public:
   enum : EventType {
     Unknown = -1,
     Resize,
   };
 
-  WindowEvents(ui::Window* window)
-    : m_window(window) {
-  }
+  WindowEvents(ui::Window* window) : m_window(window) {}
 
   ui::Window* window() const { return m_window; }
 
-  EventType eventType(const char* eventName) const override {
+  EventType eventType(const char* eventName) const override
+  {
     if (std::strcmp(eventName, "resize") == 0)
       return Resize;
     else
@@ -294,35 +331,36 @@ public:
   }
 
 private:
-
-  void onAddFirstListener(EventType eventType) override {
+  void onAddFirstListener(EventType eventType) override
+  {
     switch (eventType) {
-      case Resize:
-        m_resizeConn = m_window->Resize.connect(&WindowEvents::onResize, this);
-        break;
+      case Resize: m_resizeConn = m_window->Resize.connect(&WindowEvents::onResize, this); break;
     }
   }
 
-  void onRemoveLastListener(EventType eventType) override {
+  void onRemoveLastListener(EventType eventType) override
+  {
     switch (eventType) {
-      case Resize:
-        m_resizeConn.disconnect();
-        break;
+      case Resize: m_resizeConn.disconnect(); break;
     }
   }
 
-  void onResize(ui::ResizeEvent& ev) {
-    call(Resize, { { "width", ev.bounds().w },
-                   { "height", ev.bounds().h } });
+  void onResize(ui::ResizeEvent& ev)
+  {
+    call(Resize,
+         {
+           { "width",  ev.bounds().w },
+           { "height", ev.bounds().h }
+    });
   }
 
   ui::Window* m_window;
   obs::scoped_connection m_resizeConn;
 };
 
-class SpriteEvents : public Events
-                   , public DocUndoObserver
-                   , public DocObserver {
+class SpriteEvents : public Events,
+                     public DocUndoObserver,
+                     public DocObserver {
 public:
   enum : EventType {
     Unknown = -1,
@@ -332,14 +370,16 @@ public:
 #if ENABLE_REMAP_TILESET_EVENT
     RemapTileset,
 #endif
+    LayerBlendMode,
+    LayerName,
+    LayerOpacity,
+    LayerVisibility,
   };
 
-  SpriteEvents(const Sprite* sprite)
-    : m_spriteId(sprite->id()) {
-    doc()->add_observer(this);
-  }
+  SpriteEvents(const Sprite* sprite) : m_spriteId(sprite->id()) { doc()->add_observer(this); }
 
-  ~SpriteEvents() {
+  ~SpriteEvents()
+  {
     auto doc = this->doc();
     // The document can be nullptr in some cases like:
     // - When closing the App with an exception
@@ -353,7 +393,8 @@ public:
     }
   }
 
-  EventType eventType(const char* eventName) const override {
+  EventType eventType(const char* eventName) const override
+  {
     if (std::strcmp(eventName, "change") == 0)
       return Change;
     else if (std::strcmp(eventName, "filenamechange") == 0)
@@ -364,12 +405,21 @@ public:
     else if (std::strcmp(eventName, "remaptileset") == 0)
       return RemapTileset;
 #endif
+    else if (std::strcmp(eventName, "layerblendmode") == 0)
+      return LayerBlendMode;
+    else if (std::strcmp(eventName, "layername") == 0)
+      return LayerName;
+    else if (std::strcmp(eventName, "layeropacity") == 0)
+      return LayerOpacity;
+    else if (std::strcmp(eventName, "layervisibility") == 0)
+      return LayerVisibility;
     else
       return Unknown;
   }
 
   // DocObserver impl
-  void onCloseDocument(Doc* doc) override {
+  void onCloseDocument(Doc* doc) override
+  {
     auto it = g_spriteEvents.find(m_spriteId);
     ASSERT(it != g_spriteEvents.end());
     if (it != g_spriteEvents.end()) {
@@ -378,39 +428,85 @@ public:
     }
   }
 
-  void onFileNameChanged(Doc* doc) override {
-    call(FilenameChange);
-  }
+  void onFileNameChanged(Doc* doc) override { call(FilenameChange); }
 
-  void onAfterAddTile(DocEvent& ev) override {
-    call(AfterAddTile, { { "sprite", ev.sprite() },
-                         { "layer", ev.layer() },
-                         // This is detected as a "int" type
-                         { "frameNumber", ev.frame()+1 },
-                         { "tileset", ev.tileset() },
-                         { "tileIndex", ev.tileIndex() } });
+  void onAfterAddTile(DocEvent& ev) override
+  {
+    call(AfterAddTile,
+         {
+           { "sprite",      ev.sprite()    },
+           { "layer",       ev.layer()     },
+           // This is detected as a "int" type
+           { "frameNumber", ev.frame() + 1 },
+           { "tileset",     ev.tileset()   },
+           { "tileIndex",   ev.tileIndex() }
+    });
   }
 
 #if ENABLE_REMAP_TILESET_EVENT
-  void onRemapTileset(DocEvent& ev, const doc::Remap& remap) override {
+  void onRemapTileset(DocEvent& ev, const doc::Remap& remap) override
+  {
     const bool fromUndo = (ev.document()->transaction() == nullptr);
-    call(RemapTileset, { { "remap", std::any(&remap) },
-                         { "tileset", ev.tileset() },
-                         { "fromUndo", fromUndo } });
+    call(RemapTileset,
+         {
+           { "remap",    std::any(&remap) },
+           { "tileset",  ev.tileset()     },
+           { "fromUndo", fromUndo         }
+    });
   }
 #endif
 
   // DocUndoObserver impl
-  void onAddUndoState(DocUndo* history) override {
-    call(Change, { { "fromUndo", false } });
+  void onAddUndoState(DocUndo* history) override
+  {
+    call(Change,
+         {
+           { "fromUndo", false }
+    });
   }
-  void onCurrentUndoStateChange(DocUndo* history) override {
-    call(Change, { { "fromUndo", true } });
+  void onCurrentUndoStateChange(DocUndo* history) override
+  {
+    call(Change,
+         {
+           { "fromUndo", true }
+    });
+  }
+
+  void onLayerBlendModeChange(DocEvent& ev) override
+  {
+    call(LayerBlendMode,
+         {
+           { "layer", ev.layer() }
+    });
+  }
+
+  void onLayerNameChange(DocEvent& ev) override
+  {
+    call(LayerName,
+         {
+           { "layer", ev.layer() }
+    });
+  }
+
+  void onLayerOpacityChange(DocEvent& ev) override
+  {
+    call(LayerOpacity,
+         {
+           { "layer", ev.layer() }
+    });
+  }
+
+  void onAfterLayerVisibilityChange(DocEvent& ev) override
+  {
+    call(LayerVisibility,
+         {
+           { "layer", ev.layer() }
+    });
   }
 
 private:
-
-  void onAddFirstListener(EventType eventType) override {
+  void onAddFirstListener(EventType eventType) override
+  {
     switch (eventType) {
       case Change:
         ASSERT(!m_observingUndo);
@@ -420,7 +516,8 @@ private:
     }
   }
 
-  void onRemoveLastListener(EventType eventType) override {
+  void onRemoveLastListener(EventType eventType) override
+  {
     switch (eventType) {
       case Change: {
         disconnectFromUndoHistory(doc());
@@ -429,7 +526,8 @@ private:
     }
   }
 
-  Doc* doc() {
+  Doc* doc()
+  {
     Sprite* sprite = doc::get<Sprite>(m_spriteId);
     if (sprite)
       return static_cast<Doc*>(sprite->document());
@@ -437,7 +535,8 @@ private:
       return nullptr;
   }
 
-  void disconnectFromUndoHistory(Doc* doc) {
+  void disconnectFromUndoHistory(Doc* doc)
+  {
     if (m_observingUndo) {
       doc->undoHistory()->remove_observer(this);
       m_observingUndo = false;
@@ -486,15 +585,14 @@ int Events_off(lua_State* L)
   else if (lua_isfunction(L, 2)) {
     lua_pushnil(L);
     while (lua_next(L, LUA_REGISTRYINDEX) != 0) {
-      if (lua_isnumber(L, -2) &&
-          lua_isfunction(L, -1)) {
+      if (lua_isnumber(L, -2) && lua_isfunction(L, -1)) {
         int i = lua_tointeger(L, -2);
-        if (// Compare value=function in 2nd argument
-            lua_compare(L, -1, 2, LUA_OPEQ) &&
-            // Check that this Events contain this reference
-            evs->hasListener(i)) {
+        if ( // Compare value=function in 2nd argument
+          lua_compare(L, -1, 2, LUA_OPEQ) &&
+          // Check that this Events contain this reference
+          evs->hasListener(i)) {
           callbackRef = i;
-          lua_pop(L, 2);  // Pop value and key
+          lua_pop(L, 2); // Pop value and key
           break;
         }
       }
@@ -518,9 +616,9 @@ int Events_off(lua_State* L)
 // We don't need a __gc (to call ~Events()), because Events instances
 // will be deleted when the Sprite is deleted or on App Exit
 const luaL_Reg Events_methods[] = {
-  { "on", Events_on },
-  { "off", Events_off },
-  { nullptr, nullptr }
+  { "on",    Events_on  },
+  { "off",   Events_off },
+  { nullptr, nullptr    }
 };
 
 } // anonymous namespace
@@ -535,7 +633,7 @@ void register_events_class(lua_State* L)
 void push_app_events(lua_State* L)
 {
   if (!g_appEvents) {
-    App::instance()->Exit.connect([]{ g_appEvents.reset(); });
+    App::instance()->Exit.connect([] { g_appEvents.reset(); });
     g_appEvents.reset(new AppEvents);
   }
   push_ptr<Events>(L, g_appEvents.get());
@@ -553,7 +651,7 @@ void push_sprite_events(lua_State* L, Sprite* sprite)
   static bool atExit = false;
   if (!atExit) {
     atExit = true;
-    App::instance()->Exit.connect([]{ g_spriteEvents.clear(); });
+    App::instance()->Exit.connect([] { g_spriteEvents.clear(); });
   }
 
   ASSERT(sprite);
@@ -571,12 +669,10 @@ void push_sprite_events(lua_State* L, Sprite* sprite)
   push_ptr<Events>(L, spriteEvents);
 }
 
-#ifdef ENABLE_UI
-
 void push_window_events(lua_State* L, ui::Window* window)
 {
   if (!g_windowEvents) {
-    App::instance()->ExitGui.connect([]{ g_windowEvents.reset(); });
+    App::instance()->ExitGui.connect([] { g_windowEvents.reset(); });
     g_windowEvents = std::make_unique<WindowEvents>(window);
   }
   else {
@@ -585,7 +681,4 @@ void push_window_events(lua_State* L, ui::Window* window)
   push_ptr<Events>(L, g_windowEvents.get());
 }
 
-#endif // ENABLE_UI
-
-} // namespace script
-} // namespace app
+}} // namespace app::script

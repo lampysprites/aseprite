@@ -6,7 +6,7 @@
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "ui/panel.h"
@@ -18,8 +18,7 @@
 
 namespace ui {
 
-Panel::Panel()
-  : m_multiple(false)
+Panel::Panel() : m_multiple(false)
 {
 }
 
@@ -56,7 +55,7 @@ void Panel::onResize(ResizeEvent& ev)
   // Set all the children to the same "cpos"
   gfx::Rect cpos = childrenBounds();
   for (auto child : children()) {
-    if (!child->isDecorative())
+    if (!child->isDecorative() && child->isVisible())
       child->setBounds(cpos);
   }
 }
@@ -83,9 +82,7 @@ void Panel::onSizeHint(SizeHintEvent& ev)
   if (hasText())
     maxSize.w = std::max(maxSize.w, textWidth());
 
-  ev.setSizeHint(
-    maxSize.w + border().width(),
-    maxSize.h + border().height());
+  ev.setSizeHint(maxSize.w + border().width(), maxSize.h + border().height());
 }
 
 } // namespace ui

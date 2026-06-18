@@ -10,57 +10,69 @@
 #pragma once
 
 #include "doc/color.h"
+#include "doc/image.h"
+#include "doc/image_impl.h"
 #include "doc/image_traits.h"
 
 namespace doc {
-  class Image;
-  template<typename ImageTraits> class ImageImpl;
 
-  template<class Traits>
-  inline typename Traits::address_t get_pixel_address_fast(const Image* image, int x, int y) {
-    ASSERT(x >= 0 && x < image->width());
-    ASSERT(y >= 0 && y < image->height());
+template<typename ImageTraits>
+class ImageImpl;
 
-    return (((ImageImpl<Traits>*)image)->address(x, y));
-  }
+template<class Traits>
+inline typename Traits::address_t get_pixel_address_fast(const Image* image, int x, int y)
+{
+  ASSERT(x >= 0 && x < image->width());
+  ASSERT(y >= 0 && y < image->height());
 
-  template<class Traits>
-  inline typename Traits::pixel_t get_pixel_fast(const Image* image, int x, int y) {
-    ASSERT(x >= 0 && x < image->width());
-    ASSERT(y >= 0 && y < image->height());
+  return (((ImageImpl<Traits>*)image)->address(x, y));
+}
 
-    return *(((ImageImpl<Traits>*)image)->address(x, y));
-  }
+template<class Traits>
+inline typename Traits::pixel_t get_pixel_fast(const Image* image, int x, int y)
+{
+  ASSERT(x >= 0 && x < image->width());
+  ASSERT(y >= 0 && y < image->height());
 
-  template<class Traits>
-  inline void put_pixel_fast(Image* image, int x, int y, typename Traits::pixel_t color) {
-    ASSERT(x >= 0 && x < image->width());
-    ASSERT(y >= 0 && y < image->height());
+  return *(((ImageImpl<Traits>*)image)->address(x, y));
+}
 
-    *(((ImageImpl<Traits>*)image)->address(x, y)) = color;
-  }
+template<class Traits>
+inline void put_pixel_fast(Image* image, int x, int y, typename Traits::pixel_t color)
+{
+  ASSERT(x >= 0 && x < image->width());
+  ASSERT(y >= 0 && y < image->height());
 
-  //////////////////////////////////////////////////////////////////////
-  // Bitmap specialization
+  *(((ImageImpl<Traits>*)image)->address(x, y)) = color;
+}
 
-  template<>
-  inline BitmapTraits::pixel_t get_pixel_fast<BitmapTraits>(const Image* image, int x, int y) {
-    ASSERT(x >= 0 && x < image->width());
-    ASSERT(y >= 0 && y < image->height());
+//////////////////////////////////////////////////////////////////////
+// Bitmap specialization
 
-    return (*image->getPixelAddress(x, y)) & (1 << (x % 8)) ? 1: 0;
-  }
+#if DOC_USE_BITMAP_AS_1BPP
 
-  template<>
-  inline void put_pixel_fast<BitmapTraits>(Image* image, int x, int y, BitmapTraits::pixel_t color) {
-    ASSERT(x >= 0 && x < image->width());
-    ASSERT(y >= 0 && y < image->height());
+template<>
+inline BitmapTraits::pixel_t get_pixel_fast<BitmapTraits>(const Image* image, int x, int y)
+{
+  ASSERT(x >= 0 && x < image->width());
+  ASSERT(y >= 0 && y < image->height());
 
-    if (color)
-      *image->getPixelAddress(x, y) |= (1 << (x % 8));
-    else
-      *image->getPixelAddress(x, y) &= ~(1 << (x % 8));
-  }
+  return (*image->getPixelAddress(x, y)) & (1 << (x % 8)) ? 1 : 0;
+}
+
+template<>
+inline void put_pixel_fast<BitmapTraits>(Image* image, int x, int y, BitmapTraits::pixel_t color)
+{
+  ASSERT(x >= 0 && x < image->width());
+  ASSERT(y >= 0 && y < image->height());
+
+  if (color)
+    *image->getPixelAddress(x, y) |= (1 << (x % 8));
+  else
+    *image->getPixelAddress(x, y) &= ~(1 << (x % 8));
+}
+
+#endif // DOC_USE_BITMAP_AS_1BPP
 
 } // namespace doc
 

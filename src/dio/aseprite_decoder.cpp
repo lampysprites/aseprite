@@ -1,12 +1,12 @@
 // Aseprite Document IO Library
-// Copyright (c) 2018-2023 Igara Studio S.A.
+// Copyright (c) 2018-present Igara Studio S.A.
 // Copyright (c) 2001-2018 David Capello
 //
 // This file is released under the terms of the MIT license.
 // Read LICENSE.txt for more information.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "dio/aseprite_decoder.h"
@@ -16,6 +16,7 @@
 #include "base/file_handle.h"
 #include "base/fs.h"
 #include "base/mask_shift.h"
+#include "base/scoped_value.h"
 #include "dio/aseprite_common.h"
 #include "dio/decode_delegate.h"
 #include "dio/file_interface.h"
@@ -32,6 +33,8 @@
 
 namespace dio {
 
+using namespace doc;
+
 bool AsepriteDecoder::decode()
 {
   bool ignore_old_color_chunks = false;
@@ -42,49 +45,46 @@ bool AsepriteDecoder::decode()
     return false;
   }
 
-  if (header.depth != 32 &&
-      header.depth != 16 &&
-      header.depth != 8) {
-    delegate()->error(
-      fmt::format("Invalid color depth {0}",
-                  header.depth));
+  if (header.depth != 32 && header.depth != 16 && header.depth != 8) {
+    delegate()->error(fmt::format("Invalid color depth {0}", header.depth));
     return false;
   }
 
   if (header.width < 1 || header.height < 1) {
-    delegate()->error(
-      fmt::format("Invalid sprite size {0}x{1}",
-                  header.width, header.height));
+    delegate()->error(fmt::format("Invalid sprite size {0}x{1}", header.width, header.height));
     return false;
   }
 
   // Create the new sprite
-  std::unique_ptr<doc::Sprite> sprite(
-    std::make_unique<doc::Sprite>(doc::ImageSpec(header.depth == 32 ? doc::ColorMode::RGB:
-                                                 header.depth == 16 ? doc::ColorMode::GRAYSCALE:
-                                                                      doc::ColorMode::INDEXED,
-                                                 header.width,
-                                                 header.height),
-                                  header.ncolors));
+  std::unique_ptr<Sprite> sprite(
+    std::make_unique<Sprite>(ImageSpec(header.depth == 32 ? ColorMode::RGB :
+                                       header.depth == 16 ? ColorMode::GRAYSCALE :
+                                                            ColorMode::INDEXED,
+                                       header.width,
+                                       header.height),
+                             header.ncolors));
 
   // Set frames and speed
-  sprite->setTotalFrames(doc::frame_t(header.frames));
+  sprite->setTotalFrames(frame_t(header.frames));
   sprite->setDurationForAllFrames(header.speed);
 
   // Set transparent entry
   sprite->setTransparentColor(header.transparent_index);
 
   // Set pixel ratio
-  sprite->setPixelRatio(doc::PixelRatio(header.pixel_width, header.pixel_height));
+  sprite->setPixelRatio(PixelRatio(header.pixel_width, header.pixel_height));
 
   // Set grid bounds
-  sprite->setGridBounds(gfx::Rect(header.grid_x, header.grid_y,
-                                  header.grid_width, header.grid_height));
+  sprite->setGridBounds(
+    gfx::Rect(header.grid_x, header.grid_y, header.grid_width, header.grid_height));
+
+  sprite->useLayerUuids((header.flags & ASE_FILE_FLAG_LAYER_WITH_UUID) ==
+                        ASE_FILE_FLAG_LAYER_WITH_UUID);
 
   // Prepare variables for layer chunks
-  doc::Layer* last_layer = sprite->root();
-  doc::WithUserData* last_object_with_user_data = sprite.get();
-  doc::Cel* last_cel = nullptr;
+  Layer* last_layer = sprite->root();
+  WithUserData* last_object_with_user_data = sprite.get();
+  Cel* last_cel = nullptr;
   auto tag_it = sprite->tags().begin();
   auto tag_end = sprite->tags().end();
 
@@ -94,14 +94,14 @@ bool AsepriteDecoder::decode()
   AsepriteExternalFiles extFiles;
 
   // Just one frame?
-  doc::frame_t nframes = sprite->totalFrames();
+  frame_t nframes = sprite->totalFrames();
   if (nframes > 1 && delegate()->decodeOneFrame())
     nframes = 1;
 
   // Read frame by frame to end-of-file
-  for (doc::frame_t frame=0; frame<nframes; ++frame) {
+  for (frame_t frame = 0; frame < nframes; ++frame) {
     // Start frame position
-    size_t frame_pos = f()->tell();
+    const size_t frame_pos = tell();
     delegate()->progress((float)frame_pos / (float)header.size);
 
     // Read frame header
@@ -115,25 +115,23 @@ bool AsepriteDecoder::decode()
         sprite->setFrameDuration(frame, frame_header.duration);
 
       // Read chunks
-      for (uint32_t c=0; c<frame_header.chunks; c++) {
+      for (uint32_t c = 0; c < frame_header.chunks; c++) {
         // Start chunk position
-        size_t chunk_pos = f()->tell();
+        const size_t chunk_pos = tell();
         delegate()->progress((float)chunk_pos / (float)header.size);
 
         // Read chunk information
-        int chunk_size = read32();
-        int chunk_type = read16();
+        const int chunk_size = read32();
+        const int chunk_type = read16();
 
         switch (chunk_type) {
-
           case ASE_FILE_CHUNK_FLI_COLOR:
           case ASE_FILE_CHUNK_FLI_COLOR2:
             if (!ignore_old_color_chunks) {
-              doc::Palette* prevPal = sprite->palette(frame);
-              std::unique_ptr<doc::Palette> pal(
-                chunk_type == ASE_FILE_CHUNK_FLI_COLOR ?
-                readColorChunk(prevPal, frame):
-                readColor2Chunk(prevPal, frame));
+              Palette* prevPal = sprite->palette(frame);
+              const std::unique_ptr<Palette> pal(chunk_type == ASE_FILE_CHUNK_FLI_COLOR ?
+                                                   readColorChunk(prevPal, frame) :
+                                                   readColor2Chunk(prevPal, frame));
 
               if (prevPal->countDiff(pal.get(), NULL, NULL) > 0)
                 sprite->setPalette(pal.get(), true);
@@ -141,9 +139,8 @@ bool AsepriteDecoder::decode()
             break;
 
           case ASE_FILE_CHUNK_PALETTE: {
-            doc::Palette* prevPal = sprite->palette(frame);
-            std::unique_ptr<doc::Palette> pal(
-              readPaletteChunk(prevPal, frame));
+            Palette* prevPal = sprite->palette(frame);
+            const std::unique_ptr<Palette> pal(readPaletteChunk(prevPal, frame));
 
             if (prevPal->countDiff(pal.get(), NULL, NULL) > 0)
               sprite->setPalette(pal.get(), true);
@@ -153,10 +150,7 @@ bool AsepriteDecoder::decode()
           }
 
           case ASE_FILE_CHUNK_LAYER: {
-            doc::Layer* newLayer =
-              readLayerChunk(&header, sprite.get(),
-                             &last_layer,
-                             &current_level);
+            Layer* newLayer = readLayerChunk(&header, sprite.get(), &last_layer, &current_level);
             if (newLayer) {
               m_allLayers.push_back(newLayer);
               last_object_with_user_data = newLayer;
@@ -170,10 +164,7 @@ bool AsepriteDecoder::decode()
           }
 
           case ASE_FILE_CHUNK_CEL: {
-            doc::Cel* cel =
-              readCelChunk(sprite.get(), frame,
-                           sprite->pixelFormat(), &header,
-                           chunk_pos+chunk_size);
+            Cel* cel = readCelChunk(frame, sprite->pixelFormat(), &header, chunk_pos + chunk_size);
             if (cel) {
               last_cel = cel;
               last_object_with_user_data = cel->data();
@@ -207,9 +198,9 @@ bool AsepriteDecoder::decode()
             break;
 
           case ASE_FILE_CHUNK_MASK: {
-            doc::Mask* mask = readMaskChunk();
+            Mask* mask = readMaskChunk();
             if (mask)
-              delete mask;      // TODO add the mask in some place?
+              delete mask; // TODO add the mask in some place?
             else
               delegate()->error("Warning: Cannot load a mask chunk");
             break;
@@ -236,21 +227,21 @@ bool AsepriteDecoder::decode()
           }
 
           case ASE_FILE_CHUNK_SLICE: {
-            doc::Slice* slice = readSliceChunk(sprite->slices());
+            Slice* slice = readSliceChunk(sprite->slices());
             if (slice)
               last_object_with_user_data = slice;
             break;
           }
 
           case ASE_FILE_CHUNK_USER_DATA: {
-            doc::UserData userData;
+            UserData userData;
             readUserDataChunk(&userData, extFiles);
 
             if (last_object_with_user_data) {
               last_object_with_user_data->setUserData(userData);
 
               switch (last_object_with_user_data->type()) {
-                case doc::ObjectType::Tag:
+                case ObjectType::Tag:
                   // Tags are a special case, user data for tags come
                   // all together (one next to other) after the tags
                   // chunk, in the same order:
@@ -271,12 +262,12 @@ bool AsepriteDecoder::decode()
                   else
                     last_object_with_user_data = nullptr;
                   break;
-                case doc::ObjectType::Tileset:
+                case ObjectType::Tileset:
                   // Read tiles user datas.
                   // TODO: Should we refactor how tile user data is handled so we can actually
                   // decode this user data chunks the same way as the user data chunks for
                   // the tags?
-                  doc::Tileset* tileset = static_cast<doc::Tileset*>(last_object_with_user_data);
+                  Tileset* tileset = static_cast<Tileset*>(last_object_with_user_data);
                   readTilesData(tileset, extFiles);
                   last_object_with_user_data = nullptr;
                   break;
@@ -286,7 +277,7 @@ bool AsepriteDecoder::decode()
           }
 
           case ASE_FILE_CHUNK_TILESET: {
-            doc::Tileset* tileset = readTilesetChunk(sprite.get(), &header, extFiles);
+            Tileset* tileset = readTilesetChunk(sprite.get(), &header, extFiles);
             if (tileset)
               last_object_with_user_data = tileset;
             break;
@@ -299,12 +290,12 @@ bool AsepriteDecoder::decode()
         }
 
         // Skip chunk size
-        f()->seek(chunk_pos+chunk_size);
+        seek(chunk_pos + chunk_size);
       }
     }
 
     // Skip frame size
-    f()->seek(frame_pos+frame_header.size);
+    seek(frame_pos + frame_header.size);
 
     if (delegate()->isCanceled())
       break;
@@ -316,9 +307,9 @@ bool AsepriteDecoder::decode()
 
 bool AsepriteDecoder::readHeader(AsepriteHeader* header)
 {
-  size_t headerPos = f()->tell();
+  const size_t headerPos = tell();
 
-  header->size  = read32();
+  header->size = read32();
   header->magic = read16();
 
   // Developers can open any .ase file
@@ -327,34 +318,33 @@ bool AsepriteDecoder::readHeader(AsepriteHeader* header)
     return false;
 #endif
 
-  header->frames     = read16();
-  header->width      = read16();
-  header->height     = read16();
-  header->depth      = read16();
-  header->flags      = read32();
-  header->speed      = read16();
-  header->next       = read32();
-  header->frit       = read32();
+  header->frames = read16();
+  header->width = read16();
+  header->height = read16();
+  header->depth = read16();
+  header->flags = read32();
+  header->speed = read16();
+  header->next = read32();
+  header->frit = read32();
   header->transparent_index = read8();
-  header->ignore[0]  = read8();
-  header->ignore[1]  = read8();
-  header->ignore[2]  = read8();
-  header->ncolors    = read16();
+  header->ignore[0] = read8();
+  header->ignore[1] = read8();
+  header->ignore[2] = read8();
+  header->ncolors = read16();
   header->pixel_width = read8();
   header->pixel_height = read8();
-  header->grid_x       = (int16_t)read16();
-  header->grid_y       = (int16_t)read16();
-  header->grid_width   = read16();
-  header->grid_height  = read16();
+  header->grid_x = (int16_t)read16();
+  header->grid_y = (int16_t)read16();
+  header->grid_width = read16();
+  header->grid_height = read16();
 
-  if (header->depth != 8)       // Transparent index only valid for indexed images
+  if (header->depth != 8) // Transparent index only valid for indexed images
     header->transparent_index = 0;
 
-  if (header->ncolors == 0)     // 0 means 256 (old .ase files)
+  if (header->ncolors == 0) // 0 means 256 (old .ase files)
     header->ncolors = 256;
 
-  if (header->pixel_width == 0 ||
-      header->pixel_height == 0) {
+  if (header->pixel_width == 0 || header->pixel_height == 0) {
     header->pixel_width = 1;
     header->pixel_height = 1;
   }
@@ -362,13 +352,13 @@ bool AsepriteDecoder::readHeader(AsepriteHeader* header)
 #if defined(ENABLE_DEVMODE)
   // This is useful to read broken .ase files
   if (header->magic != ASE_FILE_MAGIC) {
-    header->frames  = 256;  // Frames number might be not enought for some files
-    header->width   = 1024; // Size doesn't matter, the sprite can be crop
-    header->height  = 1024;
+    header->frames = 256; // Frames number might be not enought for some files
+    header->width = 1024; // Size doesn't matter, the sprite can be crop
+    header->height = 1024;
   }
 #endif
 
-  f()->seek(headerPos+128);
+  seek(headerPos + 128);
   return true;
 }
 
@@ -381,14 +371,13 @@ void AsepriteDecoder::readFrameHeader(AsepriteFrameHeader* frame_header)
   readPadding(2);
   uint32_t nchunks = read32();
 
-  if (frame_header->chunks == 0xFFFF &&
-      frame_header->chunks < nchunks)
+  if (frame_header->chunks == 0xFFFF && frame_header->chunks < nchunks)
     frame_header->chunks = nchunks;
 }
 
 void AsepriteDecoder::readPadding(int bytes)
 {
-  for (int c=0; c<bytes; c++)
+  for (int c = 0; c < bytes; c++)
     read8();
 }
 
@@ -399,9 +388,9 @@ std::string AsepriteDecoder::readString()
     return "";
 
   std::string string;
-  string.reserve(length+1);
+  string.reserve(length + 1);
 
-  for (int c=0; c<length; c++)
+  for (int c = 0; c < length; c++)
     string.push_back(read8());
 
   return string;
@@ -457,77 +446,71 @@ double AsepriteDecoder::readDouble()
     return EOF;
 
   // Little endian.
-  long long v = (((long long)b8 << 56) |
-                 ((long long)b7 << 48) |
-                 ((long long)b6 << 40) |
-                 ((long long)b5 << 32) |
-                 ((long long)b4 << 24) |
-                 ((long long)b3 << 16) |
-                 ((long long)b2 << 8) |
-                 (long long)b1);
+  long long v = (((long long)b8 << 56) | ((long long)b7 << 48) | ((long long)b6 << 40) |
+                 ((long long)b5 << 32) | ((long long)b4 << 24) | ((long long)b3 << 16) |
+                 ((long long)b2 << 8) | (long long)b1);
   return *reinterpret_cast<double*>(&v);
 }
 
-doc::Palette* AsepriteDecoder::readColorChunk(doc::Palette* prevPal,
-                                              doc::frame_t frame)
+Palette* AsepriteDecoder::readColorChunk(Palette* prevPal, frame_t frame)
 {
   int i, c, r, g, b, packets, skip, size;
-  doc::Palette* pal = new doc::Palette(*prevPal);
+  Palette* pal = new Palette(*prevPal);
   pal->setFrame(frame);
 
-  packets = read16();   // Number of packets
+  packets = read16(); // Number of packets
   skip = 0;
 
   // Read all packets
-  for (i=0; i<packets; i++) {
+  for (i = 0; i < packets; i++) {
     skip += read8();
     size = read8();
-    if (!size) size = 256;
+    if (!size)
+      size = 256;
 
-    for (c=skip; c<skip+size; c++) {
+    for (c = skip; c < skip + size; c++) {
       r = read8();
       g = read8();
       b = read8();
-      pal->setEntry(c, doc::rgba(doc::scale_6bits_to_8bits(r),
-                                 doc::scale_6bits_to_8bits(g),
-                                 doc::scale_6bits_to_8bits(b), 255));
+      pal->setEntry(
+        c,
+        rgba(scale_6bits_to_8bits(r), scale_6bits_to_8bits(g), scale_6bits_to_8bits(b), 255));
     }
   }
 
   return pal;
 }
 
-doc::Palette* AsepriteDecoder::readColor2Chunk(doc::Palette* prevPal,
-                                               doc::frame_t frame)
+Palette* AsepriteDecoder::readColor2Chunk(Palette* prevPal, frame_t frame)
 {
   int i, c, r, g, b, packets, skip, size;
-  doc::Palette* pal = new doc::Palette(*prevPal);
+  Palette* pal = new Palette(*prevPal);
   pal->setFrame(frame);
 
-  packets = read16();   // Number of packets
+  packets = read16(); // Number of packets
   skip = 0;
 
   // Read all packets
-  for (i=0; i<packets; i++) {
+  for (i = 0; i < packets; i++) {
     skip += read8();
     size = read8();
-    if (!size) size = 256;
+    if (!size)
+      size = 256;
 
-    for (c=skip; c<skip+size; c++) {
+    for (c = skip; c < skip + size; c++) {
       r = read8();
       g = read8();
       b = read8();
-      pal->setEntry(c, doc::rgba(r, g, b, 255));
+      pal->setEntry(c, rgba(r, g, b, 255));
     }
   }
 
   return pal;
 }
 
-doc::Palette* AsepriteDecoder::readPaletteChunk(doc::Palette* prevPal,
-                                                doc::frame_t frame)
+Palette* AsepriteDecoder::readPaletteChunk(Palette* prevPal, frame_t frame)
 {
-  doc::Palette* pal = new doc::Palette(*prevPal);
+  Palette* pal = new Palette(*prevPal);
   pal->setFrame(frame);
 
   int newSize = read32();
@@ -538,13 +521,13 @@ doc::Palette* AsepriteDecoder::readPaletteChunk(doc::Palette* prevPal,
   if (newSize > 0)
     pal->resize(newSize);
 
-  for (int c=from; c<=to; ++c) {
+  for (int c = from; c <= to; ++c) {
     int flags = read16();
     int r = read8();
     int g = read8();
     int b = read8();
     int a = read8();
-    pal->setEntry(c, doc::rgba(r, g, b, a));
+    pal->setEntry(c, rgba(r, g, b, a));
 
     // Skip name
     if (flags & ASE_PALETTE_FLAG_HAS_NAME) {
@@ -556,89 +539,89 @@ doc::Palette* AsepriteDecoder::readPaletteChunk(doc::Palette* prevPal,
   return pal;
 }
 
-doc::Layer* AsepriteDecoder::readLayerChunk(AsepriteHeader* header,
-                                            doc::Sprite* sprite,
-                                            doc::Layer** previous_layer,
-                                            int* current_level)
+Layer* AsepriteDecoder::readLayerChunk(AsepriteHeader* header,
+                                       Sprite* sprite,
+                                       Layer** previous_layer,
+                                       int* current_level)
 {
   // Read chunk data
   int flags = read16();
   int layer_type = read16();
   int child_level = read16();
-  read16();                     // default width
-  read16();                     // default height
-  int blendmode = read16();     // blend mode
-  int opacity = read8();       // opacity
+  read16();                 // default width
+  read16();                 // default height
+  int blendmode = read16(); // blend mode
+  int opacity = read8();    // opacity
   readPadding(3);
   std::string name = readString();
 
-  doc::Layer* layer = nullptr;
+  Layer* layer = nullptr;
   switch (layer_type) {
+    case ASE_FILE_LAYER_IMAGE:   layer = new LayerImage(sprite); break;
 
-    case ASE_FILE_LAYER_IMAGE:
-      layer = new doc::LayerImage(sprite);
-      break;
-
-    case ASE_FILE_LAYER_GROUP:
-      layer = new doc::LayerGroup(sprite);
-      break;
+    case ASE_FILE_LAYER_GROUP:   layer = new LayerGroup(sprite); break;
 
     case ASE_FILE_LAYER_TILEMAP: {
-      doc::tileset_index tsi = read32();
+      const tileset_index tsi = read32();
       if (!sprite->tilesets()->get(tsi)) {
         delegate()->error(fmt::format("Error: tileset {0} not found", tsi));
         return nullptr;
       }
-      layer = new doc::LayerTilemap(sprite, tsi);
+      layer = new LayerTilemap(sprite, tsi);
       break;
     }
 
     default:
-      delegate()->incompatibilityError(
-        fmt::format("Unknown layer type found: {0}", layer_type));
+      delegate()->incompatibilityError(fmt::format("Unknown layer type found: {0}", layer_type));
       break;
   }
 
-  if (layer) {
-    if (layer->isImage() &&
-        // Only transparent layers can have blend mode and opacity
-        !(flags & int(doc::LayerFlags::Background))) {
-      static_cast<doc::LayerImage*>(layer)->setBlendMode((doc::BlendMode)blendmode);
-      if (header->flags & ASE_FILE_FLAG_LAYER_WITH_OPACITY)
-        static_cast<doc::LayerImage*>(layer)->setOpacity(opacity);
-    }
+  if (!layer)
+    return nullptr;
 
-    // flags
-    layer->setFlags(static_cast<doc::LayerFlags>(
-                      flags &
-                      static_cast<int>(doc::LayerFlags::PersistentFlagsMask)));
+  // Read UUID if usage is enabled
+  if (sprite->useLayerUuids())
+    layer->setUuid(readUuid());
 
-    // name
-    layer->setName(name.c_str());
+  const bool composeGroups = (header->flags & ASE_FILE_FLAG_COMPOSITE_GROUPS);
 
-    // Child level
-    if (child_level == *current_level)
-      (*previous_layer)->parent()->addLayer(layer);
-    else if (child_level > *current_level)
-      static_cast<doc::LayerGroup*>(*previous_layer)->addLayer(layer);
-    else if (child_level < *current_level) {
-      doc::LayerGroup* parent = (*previous_layer)->parent();
-      ASSERT(parent);
-      if (parent) {
-        int levels = (*current_level - child_level);
-        while (levels--) {
-          ASSERT(parent->parent());
-          if (!parent->parent())
-            break;
-          parent = parent->parent();
-        }
-        parent->addLayer(layer);
-      }
-    }
-
-    *previous_layer = layer;
-    *current_level = child_level;
+  if ((layer->isImage() || (layer->isGroup() && composeGroups)) &&
+      // Only transparent layers can have blend mode and opacity
+      !(flags & int(LayerFlags::Background))) {
+    layer->setBlendMode((BlendMode)blendmode);
+    if (header->flags & ASE_FILE_FLAG_LAYER_WITH_OPACITY)
+      layer->setOpacity(opacity);
   }
+
+  // flags
+  layer->setFlags(
+    static_cast<LayerFlags>(flags & static_cast<int>(LayerFlags::PersistentFlagsMask)));
+
+  // name
+  layer->setName(name.c_str());
+
+  // Child level
+  if (child_level == *current_level)
+    (*previous_layer)->parent()->addLayer(layer);
+  else if (child_level > *current_level)
+    static_cast<LayerGroup*>(*previous_layer)->addLayer(layer);
+  else if (child_level < *current_level) {
+    Layer* parent = (*previous_layer)->parent();
+    ASSERT(parent);
+    if (parent) {
+      int levels = (*current_level - child_level);
+      while (levels--) {
+        ASSERT(parent->parent());
+        if (!parent->parent())
+          break;
+        parent = parent->parent();
+      }
+      parent->addLayer(layer);
+    }
+  }
+
+  *previous_layer = layer;
+  *current_level = child_level;
 
   return layer;
 }
@@ -652,7 +635,7 @@ namespace {
 template<typename ImageTraits>
 void read_raw_image_templ(FileInterface* f,
                           DecodeDelegate* delegate,
-                          doc::Image* image,
+                          Image* image,
                           const AsepriteHeader* header)
 {
   PixelIO<ImageTraits> pixel_io;
@@ -660,9 +643,9 @@ void read_raw_image_templ(FileInterface* f,
   int w = image->width();
   int h = image->height();
 
-  for (y=0; y<h; ++y) {
-    for (x=0; x<w; ++x) {
-      doc::put_pixel_fast<ImageTraits>(image, x, y, pixel_io.read_pixel(f));
+  for (y = 0; y < h; ++y) {
+    for (x = 0; x < w; ++x) {
+      put_pixel_fast<ImageTraits>(image, x, y, pixel_io.read_pixel(f));
     }
     delegate->progress((float)f->tell() / (float)header->size);
   }
@@ -670,29 +653,17 @@ void read_raw_image_templ(FileInterface* f,
 
 void read_raw_image(FileInterface* f,
                     DecodeDelegate* delegate,
-                    doc::Image* image,
+                    Image* image,
                     const AsepriteHeader* header)
 {
   switch (image->pixelFormat()) {
-    case doc::IMAGE_RGB:
-      read_raw_image_templ<doc::RgbTraits>(
-        f, delegate, image, header);
-      break;
+    case IMAGE_RGB:       read_raw_image_templ<RgbTraits>(f, delegate, image, header); break;
 
-    case doc::IMAGE_GRAYSCALE:
-      read_raw_image_templ<doc::GrayscaleTraits>(
-        f, delegate, image, header);
-      break;
+    case IMAGE_GRAYSCALE: read_raw_image_templ<GrayscaleTraits>(f, delegate, image, header); break;
 
-    case doc::IMAGE_INDEXED:
-      read_raw_image_templ<doc::IndexedTraits>(
-        f, delegate, image, header);
-      break;
+    case IMAGE_INDEXED:   read_raw_image_templ<IndexedTraits>(f, delegate, image, header); break;
 
-    case doc::IMAGE_TILEMAP:
-      read_raw_image_templ<doc::TilemapTraits>(
-        f, delegate, image, header);
-      break;
+    case IMAGE_TILEMAP:   read_raw_image_templ<TilemapTraits>(f, delegate, image, header); break;
   }
 }
 
@@ -703,14 +674,14 @@ void read_raw_image(FileInterface* f,
 template<typename ImageTraits>
 void read_compressed_image_templ(FileInterface* f,
                                  DecodeDelegate* delegate,
-                                 doc::Image* image,
+                                 Image* image,
                                  const AsepriteHeader* header,
                                  const size_t chunk_end)
 {
   PixelIO<ImageTraits> pixel_io;
   z_stream zstream;
   zstream.zalloc = (alloc_func)0;
-  zstream.zfree  = (free_func)0;
+  zstream.zfree = (free_func)0;
   zstream.opaque = (voidpf)0;
 
   int err = inflateInit(&zstream);
@@ -728,12 +699,12 @@ void read_compressed_image_templ(FileInterface* f,
   while (true) {
     size_t input_bytes;
 
-    if (f->tell()+compressed.size() > chunk_end) {
+    if (f->tell() + compressed.size() > chunk_end) {
       input_bytes = chunk_end - f->tell(); // Remaining bytes
       ASSERT(input_bytes < compressed.size());
 
       if (input_bytes == 0)
-        break;                  // Done, we consumed all chunk
+        break; // Done, we consumed all chunk
     }
     else {
       input_bytes = compressed.size();
@@ -744,9 +715,7 @@ void read_compressed_image_templ(FileInterface* f,
     // Error reading "input_bytes" bytes, broken file? chunk without
     // enough compressed data?
     if (bytes_read == 0) {
-      delegate->error(
-        fmt::format("Error reading {} bytes of compressed data",
-                    input_bytes));
+      delegate->error(fmt::format("Error reading {} bytes of compressed data", input_bytes));
       break;
     }
 
@@ -768,9 +737,9 @@ void read_compressed_image_templ(FileInterface* f,
           int n = std::min(uncompressed_bytes, scanline.size() - scanline_offset);
           if (n > 0) {
             // Fill the scanline buffer until it's completed
-            std::copy(uncompressed.begin()+i,
-                      uncompressed.begin()+i+n,
-                      scanline.begin()+scanline_offset);
+            std::copy(uncompressed.begin() + i,
+                      uncompressed.begin() + i + n,
+                      scanline.begin() + scanline_offset);
             uncompressed_bytes -= n;
             scanline_offset += n;
             i += n;
@@ -781,9 +750,9 @@ void read_compressed_image_templ(FileInterface* f,
           }
           else {
             // Copy the whole scanline to the image
-            pixel_io.read_scanline(
-              (typename ImageTraits::address_t)image->getPixelAddress(0, y),
-              width, &scanline[0]);
+            pixel_io.read_scanline((typename ImageTraits::address_t)image->getPixelAddress(0, y),
+                                   width,
+                                   &scanline[0]);
             ++y;
             scanline_offset = 0;
             if (uncompressed_bytes == 0)
@@ -803,32 +772,27 @@ void read_compressed_image_templ(FileInterface* f,
 
 void read_compressed_image(FileInterface* f,
                            DecodeDelegate* delegate,
-                           doc::Image* image,
+                           Image* image,
                            const AsepriteHeader* header,
                            const size_t chunk_end)
 {
   // Try to read pixel data
   try {
     switch (image->pixelFormat()) {
-
-      case doc::IMAGE_RGB:
-        read_compressed_image_templ<doc::RgbTraits>(
-          f, delegate, image, header, chunk_end);
+      case IMAGE_RGB:
+        read_compressed_image_templ<RgbTraits>(f, delegate, image, header, chunk_end);
         break;
 
-      case doc::IMAGE_GRAYSCALE:
-        read_compressed_image_templ<doc::GrayscaleTraits>(
-          f, delegate, image, header, chunk_end);
+      case IMAGE_GRAYSCALE:
+        read_compressed_image_templ<GrayscaleTraits>(f, delegate, image, header, chunk_end);
         break;
 
-      case doc::IMAGE_INDEXED:
-        read_compressed_image_templ<doc::IndexedTraits>(
-          f, delegate, image, header, chunk_end);
+      case IMAGE_INDEXED:
+        read_compressed_image_templ<IndexedTraits>(f, delegate, image, header, chunk_end);
         break;
 
-      case doc::IMAGE_TILEMAP:
-        read_compressed_image_templ<doc::TilemapTraits>(
-          f, delegate, image, header, chunk_end);
+      case IMAGE_TILEMAP:
+        read_compressed_image_templ<TilemapTraits>(f, delegate, image, header, chunk_end);
         break;
     }
   }
@@ -845,14 +809,13 @@ void read_compressed_image(FileInterface* f,
 // Cel Chunk
 //////////////////////////////////////////////////////////////////////
 
-doc::Cel* AsepriteDecoder::readCelChunk(doc::Sprite* sprite,
-                                        doc::frame_t frame,
-                                        doc::PixelFormat pixelFormat,
-                                        const AsepriteHeader* header,
-                                        const size_t chunk_end)
+Cel* AsepriteDecoder::readCelChunk(frame_t frame,
+                                   PixelFormat pixelFormat,
+                                   const AsepriteHeader* header,
+                                   const size_t chunk_end)
 {
   // Read chunk data
-  doc::layer_t layer_index = read16();
+  const layer_t layer_index = read16();
   int x = ((int16_t)read16());
   int y = ((int16_t)read16());
   int opacity = read8();
@@ -860,28 +823,30 @@ doc::Cel* AsepriteDecoder::readCelChunk(doc::Sprite* sprite,
   int zIndex = ((int16_t)read16());
   readPadding(5);
 
-  doc::Layer* layer = nullptr;
-  if (layer_index >= 0 && layer_index < doc::layer_t(m_allLayers.size()))
+  if (cel_type == ASE_FILE_RAW_CEL || cel_type == ASE_FILE_COMPRESSED_CEL)
+    m_celType = cel_type;
+
+  Layer* layer = nullptr;
+  if (layer_index >= 0 && layer_index < layer_t(m_allLayers.size()))
     layer = m_allLayers[layer_index];
 
   if (!layer) {
     delegate()->error(
-      fmt::format("Frame {0} didn't found layer with index {1}",
-                  (int)frame, (int)layer_index));
+      fmt::format("Frame {0} didn't found layer with index {1}", (int)frame, (int)layer_index));
     return nullptr;
   }
   if (!layer->isImage()) {
     delegate()->error(
       fmt::format("Invalid .ase file (frame {0} in layer {1} which does not contain images",
-                  (int)frame, (int)layer_index));
+                  (int)frame,
+                  (int)layer_index));
     return nullptr;
   }
 
   // Create the new frame.
-  std::unique_ptr<doc::Cel> cel;
+  std::unique_ptr<Cel> cel;
 
   switch (cel_type) {
-
     case ASE_FILE_RAW_CEL: {
       // Read width and height
       int w = read16();
@@ -889,10 +854,10 @@ doc::Cel* AsepriteDecoder::readCelChunk(doc::Sprite* sprite,
 
       if (w > 0 && h > 0) {
         // Read pixel data
-        doc::ImageRef image(doc::Image::create(pixelFormat, w, h));
+        const ImageRef image(Image::create(pixelFormat, w, h));
         read_raw_image(f(), delegate(), image.get(), header);
 
-        cel = std::make_unique<doc::Cel>(frame, image);
+        cel = std::make_unique<Cel>(frame, image);
         cel->setPosition(x, y);
         cel->setOpacity(opacity);
         cel->setZIndex(zIndex);
@@ -902,18 +867,18 @@ doc::Cel* AsepriteDecoder::readCelChunk(doc::Sprite* sprite,
 
     case ASE_FILE_LINK_CEL: {
       // Read link position
-      doc::frame_t link_frame = doc::frame_t(read16());
-      doc::Cel* link = layer->cel(link_frame);
+      const frame_t link_frame = frame_t(read16());
+      Cel* link = layer->cel(link_frame);
 
       if (link) {
         // There were a beta version that allow to the user specify
         // different X, Y, or opacity per link, in that case we must
         // create a copy.
         if (link->x() == x && link->y() == y && link->opacity() == opacity) {
-          cel.reset(doc::Cel::MakeLink(frame, link));
+          cel.reset(Cel::MakeLink(frame, link));
         }
         else {
-          cel.reset(doc::Cel::MakeCopy(frame, link));
+          cel.reset(Cel::MakeCopy(frame, link));
           cel->setPosition(x, y);
           cel->setOpacity(opacity);
         }
@@ -932,10 +897,10 @@ doc::Cel* AsepriteDecoder::readCelChunk(doc::Sprite* sprite,
       int h = read16();
 
       if (w > 0 && h > 0) {
-        doc::ImageRef image(doc::Image::create(pixelFormat, w, h));
+        const ImageRef image(Image::create(pixelFormat, w, h));
         read_compressed_image(f(), delegate(), image.get(), header, chunk_end);
 
-        cel = std::make_unique<doc::Cel>(frame, image);
+        cel = std::make_unique<Cel>(frame, image);
         cel->setPosition(x, y);
         cel->setOpacity(opacity);
         cel->setZIndex(zIndex);
@@ -965,32 +930,30 @@ doc::Cel* AsepriteDecoder::readCelChunk(doc::Sprite* sprite,
       }
 
       if (w > 0 && h > 0) {
-        doc::ImageRef image(doc::Image::create(doc::IMAGE_TILEMAP, w, h));
-        image->setMaskColor(doc::notile);
-        image->clear(doc::notile);
+        ImageRef image(Image::create(IMAGE_TILEMAP, w, h));
+        image->setMaskColor(notile);
+        image->clear(notile);
         read_compressed_image(f(), delegate(), image.get(), header, chunk_end);
 
         // Check if the tileset of this tilemap has the
         // "ASE_TILESET_FLAG_ZERO_IS_NOTILE" we have to adjust all
         // tile references to the new format (where empty tile is
         // zero)
-        doc::Tileset* ts = static_cast<doc::LayerTilemap*>(layer)->tileset();
-        doc::tileset_index tsi = static_cast<doc::LayerTilemap*>(layer)->tilesetIndex();
+        Tileset* ts = static_cast<LayerTilemap*>(layer)->tileset();
+        tileset_index tsi = static_cast<LayerTilemap*>(layer)->tilesetIndex();
         ASSERT(tsi >= 0 && tsi < m_tilesetFlags.size());
         if (tsi >= 0 && tsi < m_tilesetFlags.size() &&
             (m_tilesetFlags[tsi] & ASE_TILESET_FLAG_ZERO_IS_NOTILE) == 0) {
-          doc::fix_old_tilemap(image.get(), ts, tileIDMask, flagsMask);
+          fix_old_tilemap(image.get(), ts, tileIDMask, flagsMask);
         }
 
         // Convert the tile index and masks to a proper in-memory
         // representation for the doc-lib.
-        doc::transform_image<doc::TilemapTraits>(
+        transform_image<TilemapTraits>(
           image.get(),
-          [ts, tileIDMask, tileIDShift,
-           xflipMask, yflipMask, dflipMask]
-          (doc::tile_t tile) {
+          [ts, tileIDMask, tileIDShift, xflipMask, yflipMask, dflipMask](tile_t tile) {
             // Get the tile index.
-            doc::tile_index ti = ((tile & tileIDMask) >> tileIDShift);
+            const tile_index ti = ((tile & tileIDMask) >> tileIDShift);
 
             // If the index is out of bounds from the tileset, we
             // allow to keep some small values in-memory, but if the
@@ -1000,22 +963,20 @@ doc::Cel* AsepriteDecoder::readCelChunk(doc::Sprite* sprite,
             // creating a big Remap structure).
             //
             // Related to https://github.com/aseprite/aseprite/issues/2877
-            if (ti > ts->size() &&
-                ti > 0xffffff) {
-              return doc::notile;
+            if (ti > ts->size() && ti > 0xffffff) {
+              return notile;
             }
 
-            // Convert read index to doc::tile_i_mask, and flags to doc::tile_f_mask
-            tile = doc::tile(
-              ti,
-              ((tile & xflipMask) == xflipMask ? doc::tile_f_xflip: 0) |
-              ((tile & yflipMask) == yflipMask ? doc::tile_f_yflip: 0) |
-              ((tile & dflipMask) == dflipMask ? doc::tile_f_dflip: 0));
+            // Convert read index to tile_i_mask, and flags to tile_f_mask
+            tile = doc::tile(ti,
+                             ((tile & xflipMask) == xflipMask ? tile_f_xflip : 0) |
+                               ((tile & yflipMask) == yflipMask ? tile_f_yflip : 0) |
+                               ((tile & dflipMask) == dflipMask ? tile_f_dflip : 0));
 
             return tile;
           });
 
-        cel = std::make_unique<doc::Cel>(frame, image);
+        cel = std::make_unique<Cel>(frame, image);
         cel->setPosition(x, y);
         cel->setOpacity(opacity);
         cel->setZIndex(zIndex);
@@ -1024,20 +985,18 @@ doc::Cel* AsepriteDecoder::readCelChunk(doc::Sprite* sprite,
     }
 
     default:
-      delegate()->incompatibilityError(
-        fmt::format("Unknown cel type found: {0}", cel_type));
+      delegate()->incompatibilityError(fmt::format("Unknown cel type found: {0}", cel_type));
       break;
-
   }
 
   if (!cel)
     return nullptr;
 
-  static_cast<doc::LayerImage*>(layer)->addCel(cel.get());
+  static_cast<LayerImage*>(layer)->addCel(cel.get());
   return cel.release();
 }
 
-void AsepriteDecoder::readCelExtraChunk(doc::Cel* cel)
+void AsepriteDecoder::readCelExtraChunk(Cel* cel)
 {
   // Read chunk data
   int flags = read32();
@@ -1056,7 +1015,7 @@ void AsepriteDecoder::readCelExtraChunk(doc::Cel* cel)
   }
 }
 
-void AsepriteDecoder::readColorProfile(doc::Sprite* sprite)
+void AsepriteDecoder::readColorProfile(Sprite* sprite)
 {
   int type = read16();
   int flags = read16();
@@ -1067,7 +1026,6 @@ void AsepriteDecoder::readColorProfile(doc::Sprite* sprite)
   gfx::ColorSpaceRef cs(nullptr);
 
   switch (type) {
-
     case ASE_FILE_NO_COLOR_PROFILE:
       if (flags & ASE_COLOR_PROFILE_FLAG_GAMMA)
         cs = gfx::ColorSpace::MakeSRGBWithGamma(fixmath::fixtof(gamma));
@@ -1093,8 +1051,7 @@ void AsepriteDecoder::readColorProfile(doc::Sprite* sprite)
     }
 
     default:
-      delegate()->incompatibilityError(
-        fmt::format("Unknown color profile type found: {0}", type));
+      delegate()->incompatibilityError(fmt::format("Unknown color profile type found: {0}", type));
       break;
   }
 
@@ -1105,19 +1062,24 @@ void AsepriteDecoder::readExternalFiles(AsepriteExternalFiles& extFiles)
 {
   uint32_t n = read32();
   readPadding(8);
-  for (uint32_t i=0; i<n; ++i) {
+  for (uint32_t i = 0; i < n; ++i) {
     uint32_t id = read32();
     uint8_t type = read8();
     readPadding(7);
     std::string fn = readString();
-    extFiles.insert(id, type, fn);
+
+    if (type < ASE_EXTERNAL_FILE_TYPES)
+      extFiles.insert(id, type, fn);
+    else
+      delegate()->incompatibilityError(
+        fmt::format("Unknown externail file reference found: {0}", type));
   }
 }
 
-doc::Mask* AsepriteDecoder::readMaskChunk()
+Mask* AsepriteDecoder::readMaskChunk()
 {
   int c, u, v, byte;
-  doc::Mask* mask;
+  Mask* mask;
   // Read chunk data
   int x = read16();
   int y = read16();
@@ -1127,66 +1089,63 @@ doc::Mask* AsepriteDecoder::readMaskChunk()
   readPadding(8);
   std::string name = readString();
 
-  mask = new doc::Mask();
+  mask = new Mask();
   mask->setName(name.c_str());
   mask->replace(gfx::Rect(x, y, w, h));
 
   // Read image data
-  for (v=0; v<h; v++)
-    for (u=0; u<(w+7)/8; u++) {
+  for (v = 0; v < h; v++)
+    for (u = 0; u < (w + 7) / 8; u++) {
       byte = read8();
-      for (c=0; c<8; c++)
-        doc::put_pixel(mask->bitmap(), u*8+c, v, byte & (1<<(7-c)));
+      for (c = 0; c < 8; c++)
+        put_pixel(mask->bitmap(), u * 8 + c, v, byte & (1 << (7 - c)));
     }
 
   return mask;
 }
 
-void AsepriteDecoder::readTagsChunk(doc::Tags* tags)
+void AsepriteDecoder::readTagsChunk(Tags* tags)
 {
-  size_t ntags = read16();
+  const size_t ntags = read16();
 
-  read32();                     // 8 reserved bytes
+  read32(); // 8 reserved bytes
   read32();
 
-  for (size_t c=0; c<ntags; ++c) {
-    doc::frame_t from = read16();
-    doc::frame_t to = read16();
+  for (size_t c = 0; c < ntags; ++c) {
+    const frame_t from = read16();
+    const frame_t to = read16();
     int aniDir = read8();
-    if (aniDir != int(doc::AniDir::FORWARD) &&
-        aniDir != int(doc::AniDir::REVERSE) &&
-        aniDir != int(doc::AniDir::PING_PONG) &&
-        aniDir != int(doc::AniDir::PING_PONG_REVERSE)) {
-      aniDir = int(doc::AniDir::FORWARD);
+    if (aniDir != int(AniDir::FORWARD) && aniDir != int(AniDir::REVERSE) &&
+        aniDir != int(AniDir::PING_PONG) && aniDir != int(AniDir::PING_PONG_REVERSE)) {
+      aniDir = int(AniDir::FORWARD);
     }
 
-    int repeat = read16();      // Number of times we repeat this tag
-    read16();                   // 6 reserved bytes
+    const int repeat = read16(); // Number of times we repeat this tag
+    read16();                    // 6 reserved bytes
     read32();
 
     int r = read8();
     int g = read8();
     int b = read8();
-    read8();                     // Skip
+    read8(); // Skip
 
     std::string name = readString();
 
-    auto tag = new doc::Tag(from, to);
+    auto* tag = new Tag(from, to);
 
     // We read the color field just in case that this is a .aseprite
     // file written by an old version of Aseprite (where the there are
     // not user data for tags).
-    tag->setColor(doc::rgba(r, g, b, 255));
+    tag->setColor(rgba(r, g, b, 255));
 
     tag->setName(name);
-    tag->setAniDir((doc::AniDir)aniDir);
+    tag->setAniDir((AniDir)aniDir);
     tag->setRepeat(repeat);
     tags->add(tag);
   }
 }
 
-void AsepriteDecoder::readUserDataChunk(doc::UserData* userData,
-                                        const AsepriteExternalFiles& extFiles)
+void AsepriteDecoder::readUserDataChunk(UserData* userData, const AsepriteExternalFiles& extFiles)
 {
   size_t flags = read32();
 
@@ -1200,7 +1159,7 @@ void AsepriteDecoder::readUserDataChunk(doc::UserData* userData,
     int g = read8();
     int b = read8();
     int a = read8();
-    userData->setColor(doc::rgba(r, g, b, a));
+    userData->setColor(rgba(r, g, b, a));
   }
 
   if (flags & ASE_USER_DATA_FLAG_HAS_PROPERTIES) {
@@ -1208,14 +1167,14 @@ void AsepriteDecoder::readUserDataChunk(doc::UserData* userData,
   }
 }
 
-void AsepriteDecoder::readSlicesChunk(doc::Slices& slices)
+void AsepriteDecoder::readSlicesChunk(Slices& slices)
 {
-  size_t nslices = read32();    // Number of slices
-  read32();                     // 8 bytes reserved
+  size_t nslices = read32(); // Number of slices
+  read32();                  // 8 bytes reserved
   read32();
 
-  for (size_t i=0; i<nslices; ++i) {
-    doc::Slice* slice = readSliceChunk(slices);
+  for (size_t i = 0; i < nslices; ++i) {
+    Slice* slice = readSliceChunk(slices);
     // Set the user data
     if (slice) {
       // Default slice color
@@ -1224,21 +1183,21 @@ void AsepriteDecoder::readSlicesChunk(doc::Slices& slices)
   }
 }
 
-doc::Slice* AsepriteDecoder::readSliceChunk(doc::Slices& slices)
+Slice* AsepriteDecoder::readSliceChunk(Slices& slices)
 {
   const size_t nkeys = read32();   // Number of keys
   const int flags = read32();      // Flags
   read32();                        // 4 bytes reserved
   std::string name = readString(); // Name
 
-  std::unique_ptr<doc::Slice> slice(std::make_unique<doc::Slice>());
+  std::unique_ptr<Slice> slice(std::make_unique<Slice>());
   slice->setName(name);
 
   // For each key
-  for (size_t j=0; j<nkeys; ++j) {
+  for (size_t j = 0; j < nkeys; ++j) {
     gfx::Rect bounds, center;
-    gfx::Point pivot = doc::SliceKey::NoPivot;
-    doc::frame_t frame = read32();
+    gfx::Point pivot = SliceKey::NoPivot;
+    const frame_t frame = read32();
     bounds.x = ((int32_t)read32());
     bounds.y = ((int32_t)read32());
     bounds.w = read32();
@@ -1256,21 +1215,20 @@ doc::Slice* AsepriteDecoder::readSliceChunk(doc::Slices& slices)
       pivot.y = ((int32_t)read32());
     }
 
-    slice->insert(frame, doc::SliceKey(bounds, center, pivot));
+    slice->insert(frame, SliceKey(bounds, center, pivot));
   }
 
   slices.add(slice.get());
   return slice.release();
 }
 
-doc::Tileset* AsepriteDecoder::readTilesetChunk(
-  doc::Sprite* sprite,
-  const AsepriteHeader* header,
-  const AsepriteExternalFiles& extFiles)
+Tileset* AsepriteDecoder::readTilesetChunk(Sprite* sprite,
+                                           const AsepriteHeader* header,
+                                           const AsepriteExternalFiles& extFiles)
 {
-  const doc::tileset_index id = read32();
+  const tileset_index id = read32();
   const uint32_t flags = read32();
-  const doc::tile_index ntiles = read32();
+  const tile_index ntiles = read32();
   const int w = read16();
   const int h = read16();
   const int baseIndex = short(read16());
@@ -1280,19 +1238,18 @@ doc::Tileset* AsepriteDecoder::readTilesetChunk(
   // Errors
   if (ntiles < 0 || w < 1 || h < 1) {
     delegate()->error(
-      fmt::format("Error: Invalid tileset (number of tiles={0}, tile size={1}x{2})",
-                  ntiles, w, h));
+      fmt::format("Error: Invalid tileset (number of tiles={0}, tile size={1}x{2})", ntiles, w, h));
     return nullptr;
   }
 
-  doc::Grid grid(gfx::Size(w, h));
-  auto tileset = new doc::Tileset(sprite, grid, ntiles);
+  const Grid grid(gfx::Size(w, h));
+  auto* tileset = new Tileset(sprite, grid, ntiles);
   tileset->setName(name);
   tileset->setBaseIndex(baseIndex);
 
   if (flags & ASE_TILESET_FLAG_EXTERNAL_FILE) {
-    const uint32_t extFileId = read32(); // filename ID in the external files chunk
-    const doc::tileset_index extTilesetId = read32(); // tileset ID in the external file
+    const uint32_t extFileId = read32();         // filename ID in the external files chunk
+    const tileset_index extTilesetId = read32(); // tileset ID in the external file
 
     std::string fn;
     if (extFiles.getFilenameByID(extFileId, fn)) {
@@ -1300,39 +1257,37 @@ doc::Tileset* AsepriteDecoder::readTilesetChunk(
     }
     else {
       delegate()->error(
-        fmt::format("Error: Invalid external file reference (id={0} not found)",
-                    extFileId));
+        fmt::format("Error: Invalid external file reference (id={0} not found)", extFileId));
     }
   }
 
   if (flags & ASE_TILESET_FLAG_EMBEDDED) {
     if (ntiles > 0) {
       const size_t dataSize = read32(); // Size of compressed data
-      const size_t dataBeg = f()->tell();
-      const size_t dataEnd = dataBeg+dataSize;
+      const size_t dataBeg = tell();
+      const size_t dataEnd = dataBeg + dataSize;
 
       base::buffer compressed;
-      if (delegate()->cacheCompressedTilesets() &&
-          dataSize > 0) {
+      if (delegate()->cacheCompressedTilesets() && dataSize > 0) {
         compressed.resize(dataSize);
         f()->readBytes(&compressed[0], dataSize);
-        f()->seek(dataBeg);
+        seek(dataBeg);
       }
 
-      doc::ImageRef alltiles(doc::Image::create(sprite->pixelFormat(), w, h*ntiles));
+      const ImageRef alltiles(Image::create(sprite->pixelFormat(), w, h * ntiles));
       alltiles->setMaskColor(sprite->transparentColor());
 
       read_compressed_image(f(), delegate(), alltiles.get(), header, dataEnd);
-      f()->seek(dataEnd);
+      seek(dataEnd);
 
-      for (doc::tile_index i=0; i<ntiles; ++i) {
-        doc::ImageRef tile(doc::crop_image(alltiles.get(), 0, i*h, w, h, alltiles->maskColor()));
+      for (tile_index i = 0; i < ntiles; ++i) {
+        const ImageRef tile(crop_image(alltiles.get(), 0, i * h, w, h, alltiles->maskColor()));
         tileset->set(i, tile);
       }
 
       // If we are reading and old .aseprite file (where empty tile is not the zero]
       if ((flags & ASE_TILESET_FLAG_ZERO_IS_NOTILE) == 0)
-        doc::fix_old_tileset(tileset);
+        fix_old_tileset(tileset);
 
       if (!compressed.empty())
         tileset->setCompressedData(compressed);
@@ -1340,50 +1295,50 @@ doc::Tileset* AsepriteDecoder::readTilesetChunk(
     sprite->tilesets()->set(id, tileset);
   }
 
-  tileset->setMatchFlags(
-    (flags & ASE_TILESET_FLAG_MATCH_XFLIP ? doc::tile_f_xflip: 0) |
-    (flags & ASE_TILESET_FLAG_MATCH_YFLIP ? doc::tile_f_yflip: 0) |
-    (flags & ASE_TILESET_FLAG_MATCH_DFLIP ? doc::tile_f_dflip: 0));
+  tileset->setMatchFlags((flags & ASE_TILESET_FLAG_MATCH_XFLIP ? tile_f_xflip : 0) |
+                         (flags & ASE_TILESET_FLAG_MATCH_YFLIP ? tile_f_yflip : 0) |
+                         (flags & ASE_TILESET_FLAG_MATCH_DFLIP ? tile_f_dflip : 0));
 
   if (id >= m_tilesetFlags.size())
-    m_tilesetFlags.resize(id+1, 0);
+    m_tilesetFlags.resize(id + 1, 0);
   m_tilesetFlags[id] = flags;
 
   return tileset;
 }
 
-void AsepriteDecoder::readPropertiesMaps(doc::UserData::PropertiesMaps& propertiesMaps,
+void AsepriteDecoder::readPropertiesMaps(UserData::PropertiesMaps& propertiesMaps,
                                          const AsepriteExternalFiles& extFiles)
 {
-  auto startPos = f()->tell();
+  auto startPos = tell();
   auto size = read32();
   auto numMaps = read32();
   try {
-    for (int i=0; i<numMaps; ++i) {
+    for (int i = 0; i < numMaps; ++i) {
       auto id = read32();
       std::string extensionId; // extensionId = empty by default (when id == 0)
-      if (id &&
-          !extFiles.getFilenameByID(id, extensionId)) {
+      if (id && !extFiles.getFilenameByID(id, extensionId)) {
         // This shouldn't happen, but if it does, we put the properties
         // in an artificial extensionId.
         extensionId = fmt::format("__missed__{}", id);
-        delegate()->error(
-          fmt::format("Error: Invalid extension ID (id={0} not found)", id));
+        delegate()->error(fmt::format("Error: Invalid extension ID (id={0} not found)", id));
       }
-      auto properties = readPropertyValue(USER_DATA_PROPERTY_TYPE_PROPERTIES);
-      propertiesMaps[extensionId] = doc::get_value<doc::UserData::Properties>(properties);
+      int depth = 0;
+      auto properties = readPropertyValue(USER_DATA_PROPERTY_TYPE_PROPERTIES, depth);
+      propertiesMaps[extensionId] = get_value<UserData::Properties>(properties);
     }
   }
   catch (const base::Exception& e) {
-    delegate()->incompatibilityError(
-      fmt::format("Error reading custom properties: {0}", e.what()));
+    delegate()->incompatibilityError(fmt::format("Error reading custom properties: {0}", e.what()));
   }
 
-  f()->seek(startPos+size);
+  seek(startPos + size);
 }
 
-const doc::UserData::Variant AsepriteDecoder::readPropertyValue(uint16_t type)
+const UserData::Variant AsepriteDecoder::readPropertyValue(uint16_t type, int& depth)
 {
+  if (depth > 128)
+    throw base::Exception("More than 128 property levels in user data is not supported");
+
   switch (type) {
     case USER_DATA_PROPERTY_TYPE_NULLPTR: {
       // This shouldn't exist in a .aseprite file
@@ -1428,7 +1383,7 @@ const doc::UserData::Variant AsepriteDecoder::readPropertyValue(uint16_t type)
     }
     case USER_DATA_PROPERTY_TYPE_FIXED: {
       int32_t value = read32();
-      return doc::UserData::Fixed{value};
+      return UserData::Fixed{ value };
     }
     case USER_DATA_PROPERTY_TYPE_FLOAT: {
       float value = readFloat();
@@ -1463,65 +1418,74 @@ const doc::UserData::Variant AsepriteDecoder::readPropertyValue(uint16_t type)
       auto numElems = read32();
       auto elemsType = read16();
       auto elemType = elemsType;
-      std::vector<doc::UserData::Variant> value;
-      for (int k=0; k<numElems;++k) {
+      std::vector<UserData::Variant> value;
+      for (int k = 0; k < numElems; ++k) {
         if (elemsType == 0) {
           elemType = read16();
         }
-        value.push_back(readPropertyValue(elemType));
+
+        base::ScopedValue depthInc(depth, depth + 1);
+        value.push_back(readPropertyValue(elemType, depth));
       }
       return value;
     }
     case USER_DATA_PROPERTY_TYPE_PROPERTIES: {
       auto numProps = read32();
-      doc::UserData::Properties value;
-      for (int j=0; j<numProps;++j) {
+      UserData::Properties value;
+      for (int j = 0; j < numProps; ++j) {
         auto name = readString();
         auto type = read16();
-        value[name] = readPropertyValue(type);
+
+        base::ScopedValue depthInc(depth, depth + 1);
+        value[name] = readPropertyValue(type, depth);
       }
       return value;
     }
     case USER_DATA_PROPERTY_TYPE_UUID: {
-      base::Uuid value;
-      uint8_t* bytes = value.bytes();
-      for (int i=0; i<16; ++i) {
-        bytes[i] = read8();
-      }
-      return value;
+      return readUuid();
     }
     default: {
       throw base::Exception(
-        fmt::format("Unexpected property type '{0}' at file position {1}",
-                    type, f()->tell()));
+        fmt::format("Unexpected property type '{0}' at file position {1}", type, tell()));
     }
   }
 
-  return doc::UserData::Variant{};
+  return UserData::Variant{};
 }
 
-void AsepriteDecoder::readTilesData(doc::Tileset* tileset, const AsepriteExternalFiles& extFiles)
+void AsepriteDecoder::readTilesData(Tileset* tileset, const AsepriteExternalFiles& extFiles)
 {
   // Read as many user data chunks as tiles are in the tileset
-  for (doc::tile_index i=0; i < tileset->size(); i++) {
-    size_t chunk_pos = f()->tell();
+  for (tile_index i = 0; i < tileset->size(); i++) {
+    const size_t chunk_pos = tell();
     // Read chunk information
-    int chunk_size = read32();
-    int chunk_type = read16();
+    const int chunk_size = read32();
+    const int chunk_type = read16();
     if (chunk_type != ASE_FILE_CHUNK_USER_DATA) {
       // Something went wrong...
       delegate()->error(
         fmt::format("Warning: Unexpected chunk type {0} when reading tileset index {1}",
-                    chunk_type, i));
-      f()->seek(chunk_pos);
+                    chunk_type,
+                    i));
+      seek(chunk_pos);
       return;
     }
 
-    doc::UserData tileData;
+    UserData tileData;
     readUserDataChunk(&tileData, extFiles);
     tileset->setTileData(i, tileData);
-    f()->seek(chunk_pos+chunk_size);
+    seek(chunk_pos + chunk_size);
   }
+}
+
+base::Uuid AsepriteDecoder::readUuid()
+{
+  base::Uuid value;
+  uint8_t* bytes = value.bytes();
+  for (int i = 0; i < 16; ++i) {
+    bytes[i] = read8();
+  }
+  return value;
 }
 
 } // namespace dio

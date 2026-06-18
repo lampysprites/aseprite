@@ -1,4 +1,5 @@
 // Aseprite
+// Copyright (C) 2022-2025  Igara Studio S.A.
 // Copyright (C) 2001-2017  David Capello
 //
 // This program is distributed under the terms of
@@ -13,48 +14,50 @@
 #include "ui/popup_window.h"
 
 namespace ui {
-  class Button;
-  class CheckBox;
-  class RadioButton;
-  class Slider;
-}
+class Button;
+class CheckBox;
+class RadioButton;
+class Slider;
+} // namespace ui
 
 namespace app {
-  namespace gen {
-    class TimelineConf;
-  }
+namespace gen {
+class TimelineConf;
+}
 
-  class Doc;
+class Doc;
 
-  class ConfigureTimelinePopup : public ui::PopupWindow {
-  public:
-    ConfigureTimelinePopup();
+class ConfigureTimelinePopup : public ui::PopupWindow {
+public:
+  ConfigureTimelinePopup();
 
-  protected:
-    bool onProcessMessage(ui::Message* msg) override;
-    void onChangePosition();
-    void onChangeFirstFrame();
-    void onChangeType();
-    void onOpacity();
-    void onOpacityStep();
-    void onResetOnionskin();
-    void onLoopTagChange();
-    void onCurrentLayerChange();
-    void onPositionChange();
+protected:
+  bool onProcessMessage(ui::Message* msg) override;
+  void onChangeTimelinePosition(int option);
+  void onChangeFirstFrame();
+  void onChangeType();
+  void onOpacity();
+  void onOpacityStep();
+  void onResetOnionskin();
+  void onLoopTagChange();
+  void onCurrentLayerChange();
+  void onPositionChange();
 
-    void onZoomChange();
-    void onThumbEnabledChange();
-    void onThumbOverlayEnabledChange();
-    void onThumbOverlaySizeChange();
+  void onZoomChange();
+  void onThumbEnabledChange();
+  void onThumbOverlayEnabledChange();
+  void onThumbOverlaySizeChange();
+  void onScaleUpToFitChange();
+  void onSetAsDefaults();
 
-  private:
-    void updateWidgetsFromCurrentSettings();
-    Doc* doc();
-    DocumentPreferences& docPref();
+private:
+  void updateWidgetsFromCurrentSettings();
+  Doc* doc();
+  DocumentPreferences& docPref();
 
-    app::gen::TimelineConf* m_box;
-    bool m_lockUpdates;
-  };
+  app::gen::TimelineConf* m_box;
+  bool m_lockUpdates;
+};
 
 } // namespace app
 

@@ -1,8 +1,8 @@
 <!-- Aseprite -->
-<!-- Copyright (C) 2018-2020  Igara Studio S.A. -->
+<!-- Copyright (C) 2018-2024  Igara Studio S.A. -->
 <!-- Copyright (C) 2001-2016  David Capello -->
 <gui>
-<window id="sprite_properties" text="@.title">
+<window id="sprite_properties" text="@.title" help="sprite-properties">
   <vbox>
     <grid id="properties_grid" columns="3">
       <label text="@.filename" />
@@ -22,19 +22,19 @@
     <grid columns="2">
       <separator text="@.advanced" horizontal="true" cell_hspan="2" />
 
-      <label text="@.transparent_color" />
+      <label text="@.transparent_color" for="transparent_color" />
       <hbox>
         <hbox id="transparent_color_placeholder" />
       </hbox>
 
-      <label text="@.pixel_ratio" />
+      <label text="@.pixel_ratio" for="pixel_ratio" />
       <combobox id="pixel_ratio" cell_align="horizontal">
         <listitem text="@.square_pixels" value="1:1" />
         <listitem text="@.double_wide" value="2:1" />
         <listitem text="@.double_high" value="1:2" />
       </combobox>
 
-      <label text="@.color_profile" />
+      <label text="@.color_profile" for="color_profile" />
       <hbox>
         <combobox id="color_profile" cell_align="horizontal" expansive="true" />
         <hbox homogeneous="true">
@@ -42,6 +42,8 @@
           <button id="convert_color_profile" text="@.convert" />
         </hbox>
       </hbox>
+
+      <check text="@.use_uuid_for_layers" id="use_uuid_for_layers" tooltip="@.use_uuid_for_layers_tooltip" cell_hspan="2" />
     </grid>
 
     <vbox expansive="true" id="tilesets_placeholder">

@@ -9,21 +9,28 @@
 #define APP_UI_MAIN_MENU_BAR_H_INCLUDED
 #pragma once
 
+#include "app/ui/dockable.h"
 #include "obs/connection.h"
 #include "ui/menu.h"
 
 namespace app {
 
-  class MainMenuBar : public ui::MenuBar {
-  public:
-    MainMenuBar();
+class MainMenuBar : public ui::MenuBar,
+                    public Dockable {
+public:
+  MainMenuBar();
 
-    void reload();
+  void queueReload();
+  void reload();
 
-  private:
-    obs::scoped_connection m_extKeys;
-    obs::scoped_connection m_extScripts;
-  };
+  // Dockable impl
+  int dockableAt() const override { return ui::TOP | ui::BOTTOM; }
+
+private:
+  obs::scoped_connection m_extKeys;
+  obs::scoped_connection m_extScripts;
+  bool m_queuedReload = false;
+};
 
 } // namespace app
 

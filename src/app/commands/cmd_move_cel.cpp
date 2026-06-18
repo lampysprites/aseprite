@@ -5,14 +5,13 @@
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/app.h"
 #include "app/commands/command.h"
 #include "app/context_access.h"
 #include "app/ui/timeline/timeline.h"
-#include "ui/base.h"
 
 namespace app {
 
@@ -25,14 +24,13 @@ protected:
   void onExecute(Context* context) override;
 };
 
-MoveCelCommand::MoveCelCommand()
-  : Command(CommandId::MoveCel(), CmdUIOnlyFlag)
+MoveCelCommand::MoveCelCommand() : Command(CommandId::MoveCel())
 {
 }
 
 bool MoveCelCommand::onEnabled(Context* context)
 {
-  return App::instance()->timeline()->isMovingCel();
+  return context->isUIAvailable() && App::instance()->timeline()->isMovingCel();
 }
 
 void MoveCelCommand::onExecute(Context* context)

@@ -1,12 +1,12 @@
 // Aseprite
-// Copyright (C) 2019-2022  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2017  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+  #include "config.h"
 #endif
 
 #include "app/ui/app_menuitem.h"
@@ -19,9 +19,10 @@
 #include "app/ui/keyboard_shortcuts.h"
 #include "app/ui_context.h"
 #include "os/menus.h"
-#include "ui/accelerator.h"
 #include "ui/menu.h"
 #include "ui/message.h"
+#include "ui/scale.h"
+#include "ui/shortcut.h"
 #include "ui/size_hint_event.h"
 #include "ui/widget.h"
 
@@ -32,18 +33,29 @@ namespace app {
 
 using namespace ui;
 
-// static
+// Static vars
 Params AppMenuItem::s_contextParams;
+#if LAF_MACOS
+AppMenuItem* AppMenuItem::s_standardEditMenu = nullptr;
+#endif
 
 AppMenuItem::AppMenuItem(const std::string& text,
                          const std::string& commandId,
                          const Params& params)
- : MenuItem(text)
- , m_key(nullptr)
- , m_commandId(commandId)
- , m_params(params)
- , m_native(nullptr)
+  : MenuItem(text)
+  , m_key(nullptr)
+  , m_commandId(commandId)
+  , m_params(params)
+  , m_native(nullptr)
 {
+}
+
+AppMenuItem::~AppMenuItem()
+{
+#if LAF_MACOS
+  if (s_standardEditMenu == this)
+    s_standardEditMenu = nullptr;
+#endif
 }
 
 Command* AppMenuItem::getCommand() const
@@ -80,9 +92,21 @@ void AppMenuItem::syncNativeMenuItemKeyShortcut()
 
     m_native->shortcut = shortcut;
     m_native->menuItem->setShortcut(shortcut);
-    m_native->keyContext = (m_key ? m_key->keycontext(): KeyContext::Any);
+    m_native->keyContext = (m_key ? m_key->keycontext() : KeyContext::Any);
   }
 }
+
+#if LAF_MACOS
+void AppMenuItem::setAsStandardEditMenu()
+{
+  s_standardEditMenu = this;
+}
+
+AppMenuItem* AppMenuItem::GetStandardEditMenu()
+{
+  return s_standardEditMenu;
+}
+#endif
 
 // static
 void AppMenuItem::setContextParams(const Params& params)
@@ -93,7 +117,6 @@ void AppMenuItem::setContextParams(const Params& params)
 bool AppMenuItem::onProcessMessage(Message* msg)
 {
   switch (msg->type()) {
-
     case kCloseMessage:
       // Don't disable items with submenus
       if (!hasSubmenu()) {
@@ -112,18 +135,12 @@ void AppMenuItem::onSizeHint(SizeHintEvent& ev)
   gfx::Size size(0, 0);
 
   if (hasText()) {
-    size.w =
-      + textWidth()
-      + (inBar() ? childSpacing()/4: childSpacing())
-      + border().width();
+    size.w = textWidth() + (inBar() ? guiscaled_div(childSpacing(), 4) : childSpacing()) +
+             border().width();
+    size.h = textHeight() + border().height();
 
-    size.h =
-      + textHeight()
-      + border().height();
-
-    if (m_key && !m_key->accels().empty()) {
-      size.w += Graphics::measureUITextLength(
-        m_key->accels().front().toString().c_str(), font());
+    if (m_key && !m_key->shortcuts().empty()) {
+      size.w += font()->textLength(m_key->shortcuts().front().toString());
     }
   }
 
